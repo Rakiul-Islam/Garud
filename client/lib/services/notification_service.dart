@@ -16,10 +16,14 @@ class NotificationService {
   );
 
   static Future<void> initialize() async {
-    // Skip initialization on web platform
-    if (kIsWeb) {
-      return;
-    }
+    if (kIsWeb) return;
+
+    // Request notification permissions
+    await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
 
     // Initialize local notifications
     const AndroidInitializationSettings initializationSettingsAndroid =
@@ -40,27 +44,65 @@ class NotificationService {
     await _flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse details) async {
-        // Handle notification tap
         print('Notification tapped: ${details.payload}');
       },
     );
 
-    // Create a notification channel for Android
-    if (!kIsWeb && Platform.operatingSystem == 'android') {
+    // Create notification channel
+    if (!kIsWeb && Platform.isAndroid) {
       await _flutterLocalNotificationsPlugin
           .resolvePlatformSpecificImplementation<
               AndroidFlutterLocalNotificationsPlugin>()
           ?.createNotificationChannel(channel);
     }
 
-    // Set up foreground notification presentation options for iOS
-    if (!kIsWeb) {
-      await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-        alert: true, // Required to display a heads up notification
-        badge: true,
-        sound: true,
+    // Set up foreground notification presentation options
+    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    // Set up message handlers
+    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageOpenedApp);
+
+    // Check for initial message
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      _handleMessageOpenedApp(initialMessage);
+    }
+  }
+
+  static Future<void> _handleForegroundMessage(RemoteMessage message) async {
+    print("Got a message whilst in the foreground!");
+    print("Message data: ${message.data}");
+
+    if (message.notification != null) {
+      await showNotification(
+        message.notification?.title,
+        message.notification?.body,
+        message.data['payload'],
       );
     }
+  }
+
+  @pragma('vm:entry-point')
+  static Future<void> handleBackgroundMessage(RemoteMessage message) async {
+    print("Handling a background message: ${message.messageId}");
+    
+    if (message.notification != null) {
+      await showNotification(
+        message.notification?.title,
+        message.notification?.body,
+        message.data['payload'],
+      );
+    }
+  }
+
+  static void _handleMessageOpenedApp(RemoteMessage message) {
+    print("Message opened app: ${message.data}");
+    // Handle notification tap when app is in background/terminated
   }
 
   static Future<void> showNotification(
@@ -68,19 +110,21 @@ class NotificationService {
     String? body,
     String? payload,
   ) async {
+    if (kIsWeb) return;
+
     await _flutterLocalNotificationsPlugin.show(
-      DateTime.now().millisecond, // Unique ID
-      title,
-      body,
+      DateTime.now().millisecond,
+      title ?? 'Notification',
+      body ?? 'No message body',
       NotificationDetails(
         android: AndroidNotificationDetails(
           channel.id,
           channel.name,
           channelDescription: channel.description,
           icon: '@mipmap/ic_launcher',
-          // Add other customization options here
           importance: Importance.high,
           priority: Priority.high,
+          showWhen: true,
         ),
         iOS: const DarwinNotificationDetails(
           presentAlert: true,
@@ -90,12 +134,5 @@ class NotificationService {
       ),
       payload: payload,
     );
-  }
-
-  static Future<void> handleBackgroundMessage(RemoteMessage message) async {
-    print("Handling background message: ${message.messageId}");
-    
-    // You could add custom logic here to process background messages
-    // For example, storing them in a local database
   }
 }

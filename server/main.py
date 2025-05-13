@@ -1,5 +1,7 @@
 import asyncio
+import json
 import socket
+import requests
 import websockets
 import cv2
 import numpy as np
@@ -8,12 +10,31 @@ import time
 import threading
 import queue
 import face_recognition
-from flask import Flask, Response
+from flask import Flask, Response, jsonify, request
 from threading import Lock
+import firebase_admin
+from firebase_admin import credentials, firestore, messaging
+from google.cloud import firestore
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request as GoogleRequest
 
 # Configuration
 ENCODINGS_FILE = "face_encodings.pkl"
 PRINT_COOLDOWN = 15 * 60  # 15 minutes in seconds
+PROJECT_ID = "garud-21e17"
+
+# Initialize Firebase only once
+credentials = service_account.Credentials.from_service_account_file(
+    "service_account.json",
+    scopes=[
+        "https://www.googleapis.com/auth/datastore",
+        "https://www.googleapis.com/auth/firebase.messaging"
+    ]
+)
+
+# Setup Firestore client
+db = firestore.Client(credentials=credentials, project=PROJECT_ID)
+
 
 # Load face encodings
 with open(ENCODINGS_FILE, "rb") as f:
@@ -37,6 +58,22 @@ def process_frames(input_queue, output_queue, client_id):
     prev_num_faces = 0
 
     print(f"Processor started for {client_id}")
+    try:
+        # Fetch UID from garudIDMap
+        doc_ref = db.collection("garudIdMap").document(client_id)
+        doc = doc_ref.get()
+        if doc.exists:
+            uid = doc.to_dict().get("UId")
+            # Assuming user's FCM token is stored in collection "users" as "fcm_token"
+            user_doc = db.collection("users").document(uid).get()
+            fcm_token = user_doc.to_dict().get("token")
+        else:
+            print(f"No UID mapping found for client_id {client_id}")
+            fcm_token = None
+        print(f"UID: {uid}, FCM Token: {fcm_token}")
+    except Exception as e:
+        print(f"Error retrieving UID/FCM token: {e}")
+        fcm_token = None
     
     try:
         while running:
@@ -94,6 +131,11 @@ def process_frames(input_queue, output_queue, client_id):
                             print(f"Detected: {name}")
                             last_print_times[name] = current_time
 
+                            # Send FCM notification
+                            if fcm_token:
+                                detectedData = {"name": name}
+                                send_notification(fcm_token, detectedData)
+
                 color = (0, 255, 0) if name.endswith("G") else (0, 0, 255) if name != "Unknown" else (0, 255, 255)
                 cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
                 cv2.putText(frame, name, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
@@ -112,6 +154,35 @@ def process_frames(input_queue, output_queue, client_id):
     finally:
         print(f"Closing processor for {client_id}")
         output_queue.put(None)
+
+def get_access_token():
+    auth_req = GoogleRequest()
+    credentials.refresh(auth_req)
+    return credentials.token
+
+# Send FCM push notification
+def send_notification(fcm_token, detectedData):
+    # detectedData is a dictionary containing the name and extra info about the detected person 
+    url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
+    headers = {
+        "Authorization": f"Bearer {get_access_token()}",
+        "Content-Type": "application/json; UTF-8",
+    }
+
+    message_payload = {
+        "message": {
+            "token": fcm_token,
+            "notification": {
+                "title": detectedData["name"] + " was detected on your device.",
+                "body": "",
+            },
+            "data": detectedData or {}
+        }
+    }
+
+    response = requests.post(url, headers=headers, data=json.dumps(message_payload))
+    return response.status_code, response.text
+
 
 def generate_video(client_id):
     while True:

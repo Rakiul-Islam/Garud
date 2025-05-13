@@ -51,6 +51,18 @@ def send_fcm_notification(fcm_token, title, body, data=None):
     response = requests.post(url, headers=headers, data=json.dumps(message_payload))
     return response.status_code, response.text
 
+# http://127.0.0.1:5000/send-notification
+# Sample json for body
+# {
+#   "uid": "Rx41ynvnxAet087FfphfXA8MQzq2",  
+#   "title": "Face Detected",
+#   "body": "John Doe was detected near your device.",
+#   "data": {
+#     "name": "John Doe",
+#     "client_id": "client-98765"
+#   }
+# }
+
 @app.route("/send-notification", methods=["POST"])
 def notify_user():
     req_data = request.json
