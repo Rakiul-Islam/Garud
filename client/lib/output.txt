@@ -1,0 +1,1009 @@
+// main.dart :
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:garudclient/blocs/user/user_bloc.dart';
+import 'package:garudclient/navigation/auth_wrapper.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'firebase_options.dart';
+import 'services/notification_service.dart';
+import 'repositories/auth_repository.dart';
+import 'blocs/auth/auth_bloc.dart';
+import 'blocs/theme/theme_bloc.dart';
+import 'blocs/theme/theme_state.dart';
+import 'config/theme_config.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  
+  // Register background message handler before initializing notifications
+  FirebaseMessaging.onBackgroundMessage(NotificationService.handleBackgroundMessage);
+  
+  await NotificationService.initialize();
+  
+  // Initialize SharedPreferences
+  final prefs = await SharedPreferences.getInstance();
+
+  runApp(MyApp(prefs: prefs));
+}
+
+class MyApp extends StatelessWidget {
+  final AuthRepository _authRepository = AuthRepository();
+  final SharedPreferences prefs;
+
+  MyApp({required this.prefs});
+
+  @override
+  Widget build(BuildContext context) {
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider<AuthBloc>(create: (_) => AuthBloc(_authRepository)),
+        BlocProvider<UserBloc>(create: (_) => UserBloc()),
+        BlocProvider<ThemeBloc>(create: (_) => ThemeBloc(prefs)),
+      ],
+      child: BlocBuilder<ThemeBloc, ThemeState>(
+        builder: (context, state) {
+          return MaterialApp(
+            title: 'Garud',
+            theme: AppTheme.lightTheme,
+            darkTheme: AppTheme.darkTheme,
+            themeMode: state.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+            home: AuthWrapper(), // Use our new AuthWrapper instead of LoginPage
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+
+// blocs/auth/auth_bloc.dart :
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:garudclient/repositories/auth_repository.dart';
+import 'dart:async';
+import 'auth_event.dart';
+import 'auth_state.dart';
+
+class AuthBloc extends Bloc<AuthEvent, AuthState> {
+  final AuthRepository authRepository;
+  late StreamSubscription<User?> _authStateSubscription;
+
+  AuthBloc(this.authRepository) : super(AuthInitial()) {
+    // Add this to check auth status when bloc initializes
+    add(CheckAuthStatus());
+
+    on<CheckAuthStatus>((event, emit) async {
+      emit(AuthLoading());
+      try {
+        final isLoggedIn = await authRepository.isLoggedIn();
+        if (isLoggedIn) {
+          emit(AuthSuccess());
+        } else {
+          emit(AuthInitial());
+        }
+      } catch (e) {
+        emit(AuthFailure(message: e.toString()));
+      }
+    });
+
+    on<LoginRequested>((event, emit) async {
+      emit(AuthLoading());
+      try {
+        await authRepository.login(event.email, event.password);
+        emit(AuthSuccess());
+      } catch (e) {
+        emit(AuthFailure(message: e.toString()));
+      }
+    });
+
+    on<LogoutRequested>((event, emit) async {
+      emit(AuthLoading());
+      try {
+        await authRepository.logout();
+        emit(AuthInitial());
+      } catch (e) {
+        emit(AuthFailure(message: e.toString()));
+      }
+    });
+
+    // Listen to Firebase Auth state changes
+    _authStateSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
+      if (user != null) {
+        emit(AuthSuccess());
+      } else {
+        emit(AuthInitial());
+      }
+    });
+  }
+
+  @override
+  Future<void> close() {
+    _authStateSubscription.cancel();
+    return super.close();
+  }
+}
+
+
+
+// blocs/auth/auth_event.dart :
+abstract class AuthEvent {}
+
+class CheckAuthStatus extends AuthEvent {}
+
+class LoginRequested extends AuthEvent {
+  final String email;
+  final String password;
+
+  LoginRequested({required this.email, required this.password});
+}
+
+class LogoutRequested extends AuthEvent {}
+
+
+
+// blocs/auth/auth_state.dart :
+abstract class AuthState {}
+
+class AuthInitial extends AuthState {}
+
+class AuthLoading extends AuthState {}
+
+class AuthSuccess extends AuthState {}
+
+class AuthFailure extends AuthState {
+  final String message;
+
+  AuthFailure({required this.message});
+}
+
+
+
+// blocs/theme/theme_bloc.dart :
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'theme_event.dart';
+import 'theme_state.dart';
+
+class ThemeBloc extends Bloc<ThemeEvent, ThemeState> {
+  final SharedPreferences prefs;
+  static const String _themeKey = 'is_dark_mode';
+
+  ThemeBloc(this.prefs) : super(ThemeState(isDarkMode: prefs.getBool(_themeKey) ?? false)) {
+    on<ToggleTheme>(_onToggleTheme);
+  }
+
+  void _onToggleTheme(ToggleTheme event, Emitter<ThemeState> emit) async {
+    final newIsDarkMode = !state.isDarkMode;
+    await prefs.setBool(_themeKey, newIsDarkMode);
+    emit(state.copyWith(isDarkMode: newIsDarkMode));
+  }
+}
+
+
+
+// blocs/theme/theme_event.dart :
+abstract class ThemeEvent {}
+
+class ToggleTheme extends ThemeEvent {}
+
+
+
+// blocs/theme/theme_state.dart :
+import 'package:flutter/material.dart';
+import 'package:equatable/equatable.dart';
+
+class ThemeState extends Equatable {
+  final bool isDarkMode;
+
+  const ThemeState({this.isDarkMode = false});
+
+  ThemeState copyWith({bool? isDarkMode}) {
+    return ThemeState(isDarkMode: isDarkMode ?? this.isDarkMode);
+  }
+
+  @override
+  List<Object?> get props => [isDarkMode];
+}
+
+
+
+// blocs/user/user_bloc.dart :
+import 'package:bloc/bloc.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
+import 'user_event.dart';
+import 'user_state.dart';
+
+class UserBloc extends Bloc<UserEvent, UserState> {
+  UserBloc() : super(UserInitial()) {
+    on<AddGuardianRequested>(_onAddGuardianRequested);
+    on<FetchGuardiansRequested>(_onFetchGuardiansRequested);
+    on<DeleteGuardianRequested>(_onDeleteGuardianRequested);
+  }
+
+  Future<void> _onAddGuardianRequested(
+      AddGuardianRequested event, Emitter<UserState> emit) async {
+    emit(GuardianAddInProgress());
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) throw Exception("User not logged in");
+
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('email', isEqualTo: event.guardianEmail)
+          .limit(1)
+          .get();
+
+      if (querySnapshot.docs.isEmpty) {
+        throw Exception("Guardian not found");
+      }
+
+      final guardianUid = querySnapshot.docs.first.id;
+
+      if (guardianUid == currentUser.uid) {
+        throw Exception("You can't add yourself as a guardian");
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .update({
+        'guardians': FieldValue.arrayUnion([guardianUid])
+      });
+
+      emit(GuardianAdded());
+      add(FetchGuardiansRequested()); // refresh list
+    } catch (e) {
+      emit(GuardianAddFailed(e.toString()));
+    }
+  }
+
+  Future<void> _onFetchGuardiansRequested(
+      FetchGuardiansRequested event, Emitter<UserState> emit) async {
+    emit(GuardiansLoadInProgress());
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) throw Exception("User not logged in");
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+
+      final guardianUids =
+          List<String>.from(userDoc.data()?['guardians'] ?? []);
+
+      List<Map<String, String>> tempList = [];
+
+      for (String uid in guardianUids) {
+        final guardianDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get();
+        if (guardianDoc.exists && guardianDoc.data()?['email'] != null) {
+          tempList.add({
+            'uid': uid,
+            'email': guardianDoc.data()!['email'],
+          });
+        }
+      }
+
+      emit(GuardiansLoaded(tempList));
+    } catch (e) {
+      emit(GuardianAddFailed(e.toString()));
+    }
+  }
+
+  Future<void> _onDeleteGuardianRequested(
+      DeleteGuardianRequested event, Emitter<UserState> emit) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) throw Exception("User not logged in");
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .update({
+        'guardians': FieldValue.arrayRemove([event.uidToRemove])
+      });
+
+      add(FetchGuardiansRequested());
+    } catch (e) {
+      emit(GuardianDeleteFailed(e.toString()));
+    }
+  }
+}
+
+
+
+// blocs/user/user_event.dart :
+import 'package:equatable/equatable.dart';
+
+abstract class UserEvent extends Equatable {
+  const UserEvent();
+  @override
+  List<Object> get props => [];
+}
+
+class AddGuardianRequested extends UserEvent {
+  final String guardianEmail;
+  const AddGuardianRequested(this.guardianEmail);
+  @override
+  List<Object> get props => [guardianEmail];
+}
+
+class FetchGuardiansRequested extends UserEvent {}
+
+class DeleteGuardianRequested extends UserEvent {
+  final String uidToRemove;
+  const DeleteGuardianRequested(this.uidToRemove);
+  @override
+  List<Object> get props => [uidToRemove];
+}
+
+
+
+// blocs/user/user_state.dart :
+import 'package:equatable/equatable.dart';
+
+abstract class UserState extends Equatable {
+  const UserState();
+  @override
+  List<Object?> get props => [];
+}
+
+class UserInitial extends UserState {}
+
+class GuardianAddInProgress extends UserState {}
+
+class GuardianAdded extends UserState {}
+
+class GuardianAddFailed extends UserState {
+  final String message;
+  const GuardianAddFailed(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+
+class GuardiansLoadInProgress extends UserState {}
+
+class GuardiansLoaded extends UserState {
+  final List<Map<String, String>> guardians;
+  const GuardiansLoaded(this.guardians);
+  @override
+  List<Object?> get props => [guardians];
+}
+
+class GuardianDeleteFailed extends UserState {
+  final String message;
+  const GuardianDeleteFailed(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+
+
+
+// config/theme_config.dart :
+import 'package:flutter/material.dart';
+
+class AppTheme {
+  static ThemeData get lightTheme {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.light,
+      colorScheme: ColorScheme.light(
+        primary: Colors.blue.shade700,
+        secondary: Colors.blue.shade500,
+        surface: Colors.white,
+        background: Colors.grey.shade50,
+        error: Colors.red.shade700,
+      ),
+      appBarTheme: AppBarTheme(
+        elevation: 0,
+        centerTitle: true,
+        backgroundColor: Colors.blue.shade700,
+        foregroundColor: Colors.white,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        filled: true,
+        fillColor: Colors.grey.shade100,
+      ),
+      cardTheme: CardTheme(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+
+  static ThemeData get darkTheme {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      colorScheme: ColorScheme.dark(
+        primary: Colors.blue.shade300,
+        secondary: Colors.blue.shade200,
+        surface: Colors.grey.shade900,
+        background: Colors.grey.shade900,
+        error: Colors.red.shade300,
+      ),
+      appBarTheme: AppBarTheme(
+        elevation: 0,
+        centerTitle: true,
+        backgroundColor: Colors.grey.shade900,
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        filled: true,
+        fillColor: Colors.grey.shade800,
+      ),
+      cardTheme: CardTheme(
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+      ),
+    );
+  }
+}
+
+
+
+// data/models/user_model.dart :
+
+
+
+
+// data/repositories/auth_repository.dart :
+
+
+
+
+// navigation/auth_wrapper.dart :
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:garudclient/screens/home_page.dart';
+import 'package:garudclient/screens/login_page.dart';
+import '../blocs/auth/auth_bloc.dart';
+import '../blocs/auth/auth_state.dart';
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({Key? key}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<AuthBloc, AuthState>(
+      builder: (context, state) {
+        if (state is AuthSuccess) {
+          return const HomePage();
+        } else if (state is AuthLoading) {
+          return const Scaffold(
+            body: Center(
+              child: CircularProgressIndicator(),
+            ),
+          );
+        } else {
+          return LoginPage();
+        }
+      },
+    );
+  }
+}
+
+
+
+// repositories/auth_repository.dart :
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+
+class AuthRepository {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  // Check if user is already logged in
+  Future<bool> isLoggedIn() async {
+    return _auth.currentUser != null;
+  }
+
+  Future<void> login(String email, String password) async {
+    final userCredential = await _auth.signInWithEmailAndPassword(
+        email: email, password: password);
+
+    String? token = await FirebaseMessaging.instance.getToken();
+
+    if (token != null) {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .set({'token': token}, SetOptions(merge: true));
+    }
+  }
+
+  Future<void> logout() async {
+    await _auth.signOut();
+  }
+}
+
+
+
+// screens/add_guardians_page.dart :
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/user/user_bloc.dart';
+import '../blocs/user/user_event.dart';
+import '../blocs/user/user_state.dart';
+
+class AddGuardianPage extends StatefulWidget {
+  const AddGuardianPage({super.key});
+
+  @override
+  State<AddGuardianPage> createState() => _AddGuardianPageState();
+}
+
+class _AddGuardianPageState extends State<AddGuardianPage> {
+  final TextEditingController _emailController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    context.read<UserBloc>().add(FetchGuardiansRequested());
+  }
+
+  void _submitGuardian() {
+    final email = _emailController.text.trim();
+    if (email.isNotEmpty) {
+      context.read<UserBloc>().add(AddGuardianRequested(email));
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter an email')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Add Guardian'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () => context.read<UserBloc>().add(FetchGuardiansRequested()),
+            tooltip: 'Refresh Guardian List',
+          ),
+        ],
+      ),
+      body: BlocConsumer<UserBloc, UserState>(
+        listener: (context, state) {
+          if (state is GuardianAdded) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Guardian added successfully')),
+            );
+            _emailController.clear();
+          } else if (state is GuardianAddFailed || state is GuardianDeleteFailed) {
+            final message = (state as dynamic).message;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(message)),
+            );
+          }
+        },
+        builder: (context, state) {
+          final isLoading = state is GuardiansLoadInProgress || state is GuardianAddInProgress;
+
+          return Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Current Guardians:',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                if (isLoading)
+                  const Center(child: CircularProgressIndicator())
+                else if (state is GuardiansLoaded && state.guardians.isEmpty)
+                  const Text('No guardians added yet.')
+                else if (state is GuardiansLoaded)
+                  ...state.guardians.map(
+                    (guardian) => ListTile(
+                      leading: const Icon(Icons.person),
+                      title: Text(guardian['email'] ?? ''),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => context
+                            .read<UserBloc>()
+                            .add(DeleteGuardianRequested(guardian['uid']!)),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 30),
+                TextField(
+                  controller: _emailController,
+                  decoration: const InputDecoration(
+                    labelText: 'Guardian Email',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                ElevatedButton(
+                  onPressed: isLoading ? null : _submitGuardian,
+                  child: isLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Add Guardian'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+
+// screens/home_page.dart :
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/theme/theme_bloc.dart';
+import '../blocs/theme/theme_event.dart';
+import '../blocs/theme/theme_state.dart';
+import 'login_page.dart';
+import 'add_guardians_page.dart'; // <-- Import this
+
+class HomePage extends StatelessWidget {
+  const HomePage({super.key});
+
+  void _logout(BuildContext context) async {
+    await FirebaseAuth.instance.signOut();
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => LoginPage()),
+      (route) => false,
+    );
+  }
+
+  void _goToAddGuardianPage(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AddGuardianPage()),
+    );
+  }
+  @override
+  Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Home'),
+        actions: [
+          BlocBuilder<ThemeBloc, ThemeState>(
+            builder: (context, state) {
+              return IconButton(
+                icon: Icon(state.isDarkMode ? Icons.light_mode : Icons.dark_mode),
+                onPressed: () => context.read<ThemeBloc>().add(ToggleTheme()),
+                tooltip: state.isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+              );
+            },
+          ),
+        ],
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('Welcome, ${user?.email ?? "User"}!',
+                style: const TextStyle(fontSize: 20)),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.group_add),
+              label: const Text('Add Guardian'),
+              onPressed: () => _goToAddGuardianPage(context),
+            ),
+            const SizedBox(height: 10),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.logout),
+              label: const Text('Logout'),
+              onPressed: () => _logout(context),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+
+
+// screens/login_page.dart :
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/auth/auth_bloc.dart';
+import '../blocs/auth/auth_event.dart';
+import '../blocs/auth/auth_state.dart';
+import 'home_page.dart';
+
+class LoginPage extends StatelessWidget {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Login')),
+      body: BlocConsumer<AuthBloc, AuthState>(
+        listener: (context, state) {
+          if (state is AuthSuccess) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => HomePage()),
+            );
+          } else if (state is AuthFailure) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Login failed: ${state.message}')),
+            );
+          }
+        },
+        builder: (context, state) {
+          return Padding(
+            padding: EdgeInsets.all(16),
+            child: Column(children: [
+              TextField(
+                  controller: _emailController,
+                  decoration: InputDecoration(labelText: 'Email')),
+              TextField(
+                  controller: _passwordController,
+                  decoration: InputDecoration(labelText: 'Password'),
+                  obscureText: true),
+              SizedBox(height: 20),
+              state is AuthLoading
+                  ? CircularProgressIndicator()
+                  : ElevatedButton(
+                      onPressed: () {
+                        BlocProvider.of<AuthBloc>(context).add(LoginRequested(
+                          email: _emailController.text.trim(),
+                          password: _passwordController.text.trim(),
+                        ));
+                      },
+                      child: Text('Login'),
+                    ),
+            ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+
+// services/fcm_service.dart :
+import 'dart:convert';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:http/http.dart' as http;
+import 'package:googleapis_auth/auth_io.dart' as auth;
+
+class FCMService {
+  static const _scopes = ['https://www.googleapis.com/auth/firebase.messaging'];
+
+  Future<String> _getAccessToken() async {
+    final serviceAccountJson =
+        await rootBundle.loadString('assets/service_account.json');
+    final credentials =
+        auth.ServiceAccountCredentials.fromJson(json.decode(serviceAccountJson));
+    final client = await auth.clientViaServiceAccount(credentials, _scopes);
+    final accessToken = client.credentials.accessToken.data;
+    client.close();
+    return accessToken;
+  }
+
+  Future<void> sendNotification({
+    required String targetToken,
+    required String title,
+    required String body,
+  }) async {
+    final accessToken = await _getAccessToken();
+    final url =
+        'https://fcm.googleapis.com/v1/projects/garud-21e17/messages:send';
+
+    final message = {
+      'message': {
+        'token': targetToken,
+        'notification': {'title': title, 'body': body},
+      }
+    };
+
+    final response = await http.post(Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode(message));
+
+    if (response.statusCode == 200) {
+      print('Notification sent successfully');
+    } else {
+      print('Failed to send notification: ${response.statusCode}');
+      print('Response body: ${response.body}');
+    }
+  }
+}
+
+
+
+// services/notification_service.dart :
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+class NotificationService {
+  static final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
+      FlutterLocalNotificationsPlugin();
+  
+  static final AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'high_importance_channel', // id
+    'High Importance Notifications', // title
+    description: 'This channel is used for important notifications.', // description
+    importance: Importance.high,
+    playSound: true,
+  );
+
+  static Future<void> initialize() async {
+    if (kIsWeb) return;
+
+    // Request notification permissions
+    await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    // Initialize local notifications
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+        
+    final DarwinInitializationSettings initializationSettingsIOS =
+        DarwinInitializationSettings(
+      requestSoundPermission: true,
+      requestBadgePermission: true,
+      requestAlertPermission: true,
+    );
+    
+    final InitializationSettings initializationSettings = InitializationSettings(
+      android: initializationSettingsAndroid,
+      iOS: initializationSettingsIOS,
+    );
+    
+    await _flutterLocalNotificationsPlugin.initialize(
+      initializationSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse details) async {
+        print('Notification tapped: ${details.payload}');
+      },
+    );
+
+    // Create notification channel
+    if (!kIsWeb && Platform.isAndroid) {
+      await _flutterLocalNotificationsPlugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.createNotificationChannel(channel);
+    }
+
+    // Set up foreground notification presentation options
+    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    // Set up message handlers
+    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageOpenedApp);
+
+    // Check for initial message
+    final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      _handleMessageOpenedApp(initialMessage);
+    }
+  }
+
+  static Future<void> _handleForegroundMessage(RemoteMessage message) async {
+    print("Got a message whilst in the foreground!");
+    print("Message data: ${message.data}");
+
+    if (message.notification != null) {
+      await showNotification(
+        message.notification?.title,
+        message.notification?.body,
+        message.data['payload'],
+      );
+    }
+  }
+
+  @pragma('vm:entry-point')
+  static Future<void> handleBackgroundMessage(RemoteMessage message) async {
+    print("Handling a background message: ${message.messageId}");
+    
+    if (message.notification != null) {
+      await showNotification(
+        message.notification?.title,
+        message.notification?.body,
+        message.data['payload'],
+      );
+    }
+  }
+
+  static void _handleMessageOpenedApp(RemoteMessage message) {
+    print("Message opened app: ${message.data}");
+    // Handle notification tap when app is in background/terminated
+  }
+
+  static Future<void> showNotification(
+    String? title,
+    String? body,
+    String? payload,
+  ) async {
+    if (kIsWeb) return;
+
+    await _flutterLocalNotificationsPlugin.show(
+      DateTime.now().millisecond,
+      title ?? 'Notification',
+      body ?? 'No message body',
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          channel.id,
+          channel.name,
+          channelDescription: channel.description,
+          icon: '@mipmap/ic_launcher',
+          importance: Importance.high,
+          priority: Priority.high,
+          showWhen: true,
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: true,
+        ),
+      ),
+      payload: payload,
+    );
+  }
+}
+
+
+

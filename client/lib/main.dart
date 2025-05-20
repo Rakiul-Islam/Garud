@@ -3,9 +3,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:garudclient/blocs/user/user_bloc.dart';
+import 'package:garudclient/navigation/auth_wrapper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
-import 'screens/login_page.dart';
 import 'services/notification_service.dart';
 import 'repositories/auth_repository.dart';
 import 'blocs/auth/auth_bloc.dart';
@@ -50,7 +50,7 @@ class MyApp extends StatelessWidget {
             theme: AppTheme.lightTheme,
             darkTheme: AppTheme.darkTheme,
             themeMode: state.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-            home: LoginPage(),
+            home: AuthWrapper(), // Use our new AuthWrapper instead of LoginPage
           );
         },
       ),
