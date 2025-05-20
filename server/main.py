@@ -134,7 +134,8 @@ def process_frames(input_queue, output_queue, client_id):
                             # Send FCM notification
                             if fcm_token:
                                 detectedData = {"name": name}
-                                send_notification(fcm_token, detectedData)
+                                send_notification(uid , fcm_token, detectedData, "self")
+                                send_notifications_to_guardians(uid, detectedData )
 
                 color = (0, 255, 0) if name.endswith("G") else (0, 0, 255) if name != "Unknown" else (0, 255, 255)
                 cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
@@ -161,7 +162,8 @@ def get_access_token():
     return credentials.token
 
 # Send FCM push notification
-def send_notification(fcm_token, detectedData):
+def send_notification(uid, fcm_token, detectedData, mod):
+    # mod = "self" or "guardian"
     # detectedData is a dictionary containing the name and extra info about the detected person 
     url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
     headers = {
@@ -169,11 +171,18 @@ def send_notification(fcm_token, detectedData):
         "Content-Type": "application/json; UTF-8",
     }
 
+    if mod == "self":
+        title = detectedData["name"] + " was detected on your device."
+    elif mod == "guardian":
+        title = detectedData["name"] + " was detected on " + uid + "'s device."
+    else:
+        raise ValueError("Invalid mod value. Use 'self' or 'guardian'.")
+
     message_payload = {
         "message": {
             "token": fcm_token,
             "notification": {
-                "title": detectedData["name"] + " was detected on your device.",
+                "title": title,
                 "body": "",
             },
             "data": detectedData or {}
@@ -182,6 +191,36 @@ def send_notification(fcm_token, detectedData):
 
     response = requests.post(url, headers=headers, data=json.dumps(message_payload))
     return response.status_code, response.text
+
+
+def send_notifications_to_guardians(uid, detectedData):
+    try:
+        user_doc = db.collection("users").document(uid).get()
+        if not user_doc.exists:
+            print(f"User {uid} not found.")
+            return
+
+        user_data = user_doc.to_dict()
+        guardian_ids = user_data.get("guardians", [])
+
+        print(f"Guardians for {uid}: {guardian_ids}")
+
+        for guardian_id in guardian_ids:
+            guardian_doc = db.collection("users").document(guardian_id).get()
+            if guardian_doc.exists:
+                guardian_data = guardian_doc.to_dict()
+                fcm_token = guardian_data.get("token")
+                if fcm_token:
+                    status_code, response_text = send_notification(uid, fcm_token, detectedData, "guardian")
+                    print(f"Sent notification to guardian: {guardian_id} | Status: {status_code}")
+                else:
+                    print(f"No FCM token found for guardian: {guardian_id}")
+            else:
+                print(f"Guardian document not found: {guardian_id}")
+
+    except Exception as e:
+        print(f"Error sending notification to guardians of {uid}: {e}")
+
 
 
 def generate_video(client_id):
