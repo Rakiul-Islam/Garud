@@ -3,8 +3,8 @@ import websockets
 import cv2
 import numpy as np
 
-SERVER_URI = "ws://192.168.172.131:8888"  # Replace <server_ip> with your actual server IP
-CLIENT_ID = "maKouP2pF79XHqcFnzkA"
+SERVER_URI = "ws://192.168.196.131:8888"  # Replace <server_ip> with your actual server IP
+CLIENT_ID = "Garud001"
 
 async def send_frames():
     async with websockets.connect(SERVER_URI) as websocket:

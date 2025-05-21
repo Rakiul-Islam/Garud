@@ -4,6 +4,7 @@ import '../blocs/auth/auth_bloc.dart';
 import '../blocs/auth/auth_event.dart';
 import '../blocs/auth/auth_state.dart';
 import 'home_page.dart';
+import 'signup_page.dart';
 
 class LoginPage extends StatelessWidget {
   final _emailController = TextEditingController();
@@ -16,9 +17,10 @@ class LoginPage extends StatelessWidget {
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthSuccess) {
-            Navigator.pushReplacement(
+            Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => HomePage()),
+              (route) => false, 
             );
           } else if (state is AuthFailure) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -32,12 +34,19 @@ class LoginPage extends StatelessWidget {
             child: Column(children: [
               TextField(
                   controller: _emailController,
-                  decoration: InputDecoration(labelText: 'Email')),
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(),
+                  )),
+              SizedBox(height: 16),
               TextField(
                   controller: _passwordController,
-                  decoration: InputDecoration(labelText: 'Password'),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    border: OutlineInputBorder(),
+                  ),
                   obscureText: true),
-              SizedBox(height: 20),
+              SizedBox(height: 24),
               state is AuthLoading
                   ? CircularProgressIndicator()
                   : ElevatedButton(
@@ -49,6 +58,16 @@ class LoginPage extends StatelessWidget {
                       },
                       child: Text('Login'),
                     ),
+              SizedBox(height: 16),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => SignupPage()),
+                  );
+                },
+                child: Text('Don\'t have an account? Sign up'),
+              ),
             ]),
           );
         },

@@ -63,7 +63,7 @@ def process_frames(input_queue, output_queue, client_id):
         doc_ref = db.collection("garudIdMap").document(client_id)
         doc = doc_ref.get()
         if doc.exists:
-            uid = doc.to_dict().get("UId")
+            uid = doc.to_dict().get("uid")
             # Assuming user's FCM token is stored in collection "users" as "fcm_token"
             user_doc = db.collection("users").document(uid).get()
             fcm_token = user_doc.to_dict().get("token")

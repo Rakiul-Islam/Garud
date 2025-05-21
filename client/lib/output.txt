@@ -74,9 +74,6 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   late StreamSubscription<User?> _authStateSubscription;
 
   AuthBloc(this.authRepository) : super(AuthInitial()) {
-    // Add this to check auth status when bloc initializes
-    add(CheckAuthStatus());
-
     on<CheckAuthStatus>((event, emit) async {
       emit(AuthLoading());
       try {
@@ -86,6 +83,30 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         } else {
           emit(AuthInitial());
         }
+      } catch (e) {
+        emit(AuthFailure(message: e.toString()));
+      }
+    });
+
+    on<SignupRequested>((event, emit) async {
+      emit(AuthLoading());
+      try {
+        await authRepository.signup(event.email, event.password);
+        emit(AuthSuccess());
+      } catch (e) {
+        emit(AuthFailure(message: e.toString()));
+      }
+    });
+    
+    on<SignupWithGarudIdRequested>((event, emit) async {
+      emit(AuthLoading());
+      try {
+        await authRepository.signupWithGarudId(
+          event.email, 
+          event.password, 
+          event.garudId
+        );
+        emit(AuthSuccess());
       } catch (e) {
         emit(AuthFailure(message: e.toString()));
       }
@@ -111,12 +132,15 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       }
     });
 
+    // Add this to check auth status when bloc initializes
+    add(CheckAuthStatus());
+
     // Listen to Firebase Auth state changes
     _authStateSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (user != null) {
-        emit(AuthSuccess());
+        add(CheckAuthStatus());
       } else {
-        emit(AuthInitial());
+        add(CheckAuthStatus());
       }
     });
   }
@@ -140,6 +164,25 @@ class LoginRequested extends AuthEvent {
   final String password;
 
   LoginRequested({required this.email, required this.password});
+}
+
+class SignupRequested extends AuthEvent {
+  final String email;
+  final String password;
+
+  SignupRequested({required this.email, required this.password});
+}
+
+class SignupWithGarudIdRequested extends AuthEvent {
+  final String email;
+  final String password;
+  final String garudId;
+
+  SignupWithGarudIdRequested({
+    required this.email, 
+    required this.password, 
+    required this.garudId
+  });
 }
 
 class LogoutRequested extends AuthEvent {}
@@ -288,7 +331,7 @@ class UserBloc extends Bloc<UserEvent, UserState> {
             .get();
         if (guardianDoc.exists && guardianDoc.data()?['email'] != null) {
           tempList.add({
-            'uid': uid,
+            'UId': uid,
             'email': guardianDoc.data()!['email'],
           });
         }
@@ -527,6 +570,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 
 class AuthRepository {
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   // Check if user is already logged in
   Future<bool> isLoggedIn() async {
@@ -540,11 +584,86 @@ class AuthRepository {
     String? token = await FirebaseMessaging.instance.getToken();
 
     if (token != null) {
-      await FirebaseFirestore.instance
+      await _firestore
           .collection('users')
           .doc(userCredential.user!.uid)
           .set({'token': token}, SetOptions(merge: true));
     }
+  }
+
+  Future<void> signup(String email, String password) async {
+    final userCredential = await _auth.createUserWithEmailAndPassword(
+        email: email, password: password);
+
+    String? token = await FirebaseMessaging.instance.getToken();
+
+    if (token != null) {
+      await _firestore
+          .collection('users')
+          .doc(userCredential.user!.uid)
+          .set({
+        'token': token,
+        'email': email,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+  
+  Future<void> signupWithGarudId(String email, String password, String garudId) async {
+    // Run validation checks again to ensure Garud ID is valid and not already assigned
+    final validIdDoc = await _firestore
+        .collection('garudIdMap')
+        .doc('0')
+        .get();
+    
+    if (!validIdDoc.exists) {
+      throw Exception('Unable to verify Garud ID. Please try again later.');
+    }
+    
+    final validIds = List<String>.from(validIdDoc.data()?['ValidGarudIDList'] ?? []);
+    
+    if (!validIds.contains(garudId)) {
+      throw Exception('Invalid Garud ID. Please enter a valid ID.');
+    }
+    
+    final assignedIdDoc = await _firestore
+        .collection('garudIdMap')
+        .doc(garudId)
+        .get();
+    
+    if (assignedIdDoc.exists) {
+      throw Exception('This Garud ID is already assigned to another user.');
+    }
+    
+    // Create the user account
+    final userCredential = await _auth.createUserWithEmailAndPassword(
+        email: email, password: password);
+    
+    // Get FCM token for notifications
+    String? token = await FirebaseMessaging.instance.getToken();
+    
+    // Use a batch write to ensure consistency
+    final batch = _firestore.batch();
+    
+    // Create the user document
+    final userRef = _firestore.collection('users').doc(userCredential.user!.uid);
+    batch.set(userRef, {
+      'token': token,
+      'email': email,
+      'garudId': garudId,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    
+    // Create the garudId mapping document
+    final garudIdRef = _firestore.collection('garudIdMap').doc(garudId);
+    batch.set(garudIdRef, {
+      'uid': userCredential.user!.uid,
+      'email': email,
+      'assignedAt': FieldValue.serverTimestamp(),
+    });
+    
+    // Commit the batch
+    await batch.commit();
   }
 
   Future<void> logout() async {
@@ -679,14 +798,58 @@ class _AddGuardianPageState extends State<AddGuardianPage> {
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../blocs/theme/theme_bloc.dart';
 import '../blocs/theme/theme_event.dart';
 import '../blocs/theme/theme_state.dart';
 import 'login_page.dart';
-import 'add_guardians_page.dart'; // <-- Import this
+import 'add_guardians_page.dart';
 
-class HomePage extends StatelessWidget {
+class HomePage extends StatefulWidget {
   const HomePage({super.key});
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  String? _garudId;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists && userDoc.data()?['garudId'] != null) {
+          setState(() {
+            _garudId = userDoc.data()!['garudId'];
+          });
+        }
+      }
+    } catch (e) {
+      // Handle error silently
+      print('Error loading user data: $e');
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   void _logout(BuildContext context) async {
     await FirebaseAuth.instance.signOut();
@@ -703,6 +866,7 @@ class HomePage extends StatelessWidget {
       MaterialPageRoute(builder: (_) => const AddGuardianPage()),
     );
   }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -722,27 +886,58 @@ class HomePage extends StatelessWidget {
           ),
         ],
       ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('Welcome, ${user?.email ?? "User"}!',
-                style: const TextStyle(fontSize: 20)),
-            const SizedBox(height: 20),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.group_add),
-              label: const Text('Add Guardian'),
-              onPressed: () => _goToAddGuardianPage(context),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Welcome, ${user?.email ?? "User"}!',
+                      style: const TextStyle(fontSize: 20)),
+                  const SizedBox(height: 10),
+                  if (_garudId != null)
+                    Padding(
+                      padding: const EdgeInsets.all(8.0),
+                      child: Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16.0),
+                          child: Column(
+                            children: [
+                              const Text(
+                                'Your Garud ID',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                _garudId!,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.group_add),
+                    label: const Text('Add Guardian'),
+                    onPressed: () => _goToAddGuardianPage(context),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Logout'),
+                    onPressed: () => _logout(context),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 10),
-            ElevatedButton.icon(
-              icon: const Icon(Icons.logout),
-              label: const Text('Logout'),
-              onPressed: () => _logout(context),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -756,6 +951,7 @@ import '../blocs/auth/auth_bloc.dart';
 import '../blocs/auth/auth_event.dart';
 import '../blocs/auth/auth_state.dart';
 import 'home_page.dart';
+import 'signup_page.dart';
 
 class LoginPage extends StatelessWidget {
   final _emailController = TextEditingController();
@@ -768,9 +964,10 @@ class LoginPage extends StatelessWidget {
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthSuccess) {
-            Navigator.pushReplacement(
+            Navigator.pushAndRemoveUntil(
               context,
               MaterialPageRoute(builder: (_) => HomePage()),
+              (route) => false, 
             );
           } else if (state is AuthFailure) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -784,12 +981,19 @@ class LoginPage extends StatelessWidget {
             child: Column(children: [
               TextField(
                   controller: _emailController,
-                  decoration: InputDecoration(labelText: 'Email')),
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(),
+                  )),
+              SizedBox(height: 16),
               TextField(
                   controller: _passwordController,
-                  decoration: InputDecoration(labelText: 'Password'),
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    border: OutlineInputBorder(),
+                  ),
                   obscureText: true),
-              SizedBox(height: 20),
+              SizedBox(height: 24),
               state is AuthLoading
                   ? CircularProgressIndicator()
                   : ElevatedButton(
@@ -801,7 +1005,208 @@ class LoginPage extends StatelessWidget {
                       },
                       child: Text('Login'),
                     ),
+              SizedBox(height: 16),
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => SignupPage()),
+                  );
+                },
+                child: Text('Don\'t have an account? Sign up'),
+              ),
             ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+
+// screens/signup_page.dart :
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../blocs/auth/auth_bloc.dart';
+import '../blocs/auth/auth_event.dart';
+import '../blocs/auth/auth_state.dart';
+import 'home_page.dart';
+import 'login_page.dart';
+
+class SignupPage extends StatefulWidget {
+  @override
+  _SignupPageState createState() => _SignupPageState();
+}
+
+class _SignupPageState extends State<SignupPage> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _garudIdController = TextEditingController();
+  bool _isValidatingId = false;
+  String? _garudIdError;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _garudIdController.dispose();
+    super.dispose();
+  }
+  
+  Future<bool> _validateGarudId(String garudId) async {
+    setState(() {
+      _isValidatingId = true;
+      _garudIdError = null;
+    });
+    
+    try {
+      // Check if the ID exists in the ValidGarudIDList
+      final validIdSnapshot = await FirebaseFirestore.instance
+          .collection('garudIdMap')
+          .doc('0')
+          .get();
+      
+      if (!validIdSnapshot.exists) {
+        setState(() {
+          _isValidatingId = false;
+          _garudIdError = 'Unable to verify Garud ID. Please try again later.';
+        });
+        return false;
+      }
+      
+      final validIds = List<String>.from(validIdSnapshot.data()?['ValidGarudIDList'] ?? []);
+      
+      if (!validIds.contains(garudId)) {
+        setState(() {
+          _isValidatingId = false;
+          _garudIdError = 'Invalid Garud ID. Please enter a valid ID.';
+        });
+        return false;
+      }
+      
+      // Check if the ID is already assigned to another user
+      final assignedIdSnapshot = await FirebaseFirestore.instance
+          .collection('garudIdMap')
+          .doc(garudId)
+          .get();
+      
+      if (assignedIdSnapshot.exists) {
+        setState(() {
+          _isValidatingId = false;
+          _garudIdError = 'This Garud ID is already assigned to another user.';
+        });
+        return false;
+      }
+      
+      setState(() {
+        _isValidatingId = false;
+      });
+      return true;
+    } catch (e) {
+      setState(() {
+        _isValidatingId = false;
+        _garudIdError = 'Error validating Garud ID: ${e.toString()}';
+      });
+      return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Sign Up'),
+      ),
+      body: BlocConsumer<AuthBloc, AuthState>(
+        listener: (context, state) {
+          if (state is AuthSuccess) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => HomePage()),
+            );
+          } else if (state is AuthFailure) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Signup failed: ${state.message}')),
+            );
+          }
+        },
+        builder: (context, state) {
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(16),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                TextField(
+                  controller: _emailController,
+                  decoration: InputDecoration(
+                    labelText: 'Email',
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: _passwordController,
+                  decoration: InputDecoration(
+                    labelText: 'Password',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                ),
+                SizedBox(height: 16),
+                TextField(
+                  controller: _garudIdController,
+                  decoration: InputDecoration(
+                    labelText: 'Garud ID',
+                    border: OutlineInputBorder(),
+                    errorText: _garudIdError,
+                    helperText: 'Enter a valid Garud ID (e.g. Garud001)',
+                  ),
+                ),
+                SizedBox(height: 24),
+                state is AuthLoading || _isValidatingId
+                    ? CircularProgressIndicator()
+                    : ElevatedButton(
+                        onPressed: () async {
+                          final email = _emailController.text.trim();
+                          final password = _passwordController.text.trim();
+                          final garudId = _garudIdController.text.trim();
+                          
+                          if (email.isEmpty || password.isEmpty || garudId.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Please fill in all fields')),
+                            );
+                            return;
+                          }
+                          
+                          final isValidId = await _validateGarudId(garudId);
+                          
+                          if (isValidId) {
+                            BlocProvider.of<AuthBloc>(context).add(
+                              SignupWithGarudIdRequested(
+                                email: email,
+                                password: password,
+                                garudId: garudId,
+                              ),
+                            );
+                          }
+                        },
+                        child: Text('Sign Up'),
+                      ),
+                SizedBox(height: 16),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => LoginPage()),
+                    );
+                  },
+                  child: Text('Already have an account? Login'),
+                ),
+              ],
+            ),
           );
         },
       ),

@@ -10,8 +10,6 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
   late StreamSubscription<User?> _authStateSubscription;
 
   AuthBloc(this.authRepository) : super(AuthInitial()) {
-    // Register all event handlers in the constructor
-    
     on<CheckAuthStatus>((event, emit) async {
       emit(AuthLoading());
       try {
@@ -21,6 +19,30 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         } else {
           emit(AuthInitial());
         }
+      } catch (e) {
+        emit(AuthFailure(message: e.toString()));
+      }
+    });
+
+    on<SignupRequested>((event, emit) async {
+      emit(AuthLoading());
+      try {
+        await authRepository.signup(event.email, event.password);
+        emit(AuthSuccess());
+      } catch (e) {
+        emit(AuthFailure(message: e.toString()));
+      }
+    });
+    
+    on<SignupWithGarudIdRequested>((event, emit) async {
+      emit(AuthLoading());
+      try {
+        await authRepository.signupWithGarudId(
+          event.email, 
+          event.password, 
+          event.garudId
+        );
+        emit(AuthSuccess());
       } catch (e) {
         emit(AuthFailure(message: e.toString()));
       }
@@ -52,9 +74,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     // Listen to Firebase Auth state changes
     _authStateSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
       if (user != null) {
-        emit(AuthSuccess());
+        add(CheckAuthStatus());
       } else {
-        emit(AuthInitial());
+        add(CheckAuthStatus());
       }
     });
   }

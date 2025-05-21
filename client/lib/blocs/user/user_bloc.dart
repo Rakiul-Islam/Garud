@@ -73,7 +73,7 @@ class UserBloc extends Bloc<UserEvent, UserState> {
             .get();
         if (guardianDoc.exists && guardianDoc.data()?['email'] != null) {
           tempList.add({
-            'uid': uid,
+            'UId': uid,
             'email': guardianDoc.data()!['email'],
           });
         }
