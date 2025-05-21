@@ -4,7 +4,7 @@ output_file = "output.txt"
 current_dir = os.getcwd()
 
 # List of relative file paths to ignore
-ignoreFiles = ["firebase_options.dart", "getAll.py", "output.txt"]
+ignoreFiles = ["firebase_options.dart", "getAll.py", "output.txt", "blocs/getAll.py", "blocs/output.py"]
 
 with open(output_file, 'w', encoding='utf-8') as out:
     for root, dirs, files in os.walk(current_dir):

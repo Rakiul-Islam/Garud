@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:garudclient/blocs/user/user_bloc.dart';
+import 'package:garudclient/blocs/user/profile_bloc.dart';
 import 'package:garudclient/navigation/auth_wrapper.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
@@ -43,6 +44,7 @@ class MyApp extends StatelessWidget {
         BlocProvider<AuthBloc>(create: (_) => AuthBloc(_authRepository)),
         BlocProvider<UserBloc>(create: (_) => UserBloc()),
         BlocProvider<ThemeBloc>(create: (_) => ThemeBloc(prefs)),
+        BlocProvider<ProfileBloc>(create: (_) => ProfileBloc()),
       ],
       child: BlocBuilder<ThemeBloc, ThemeState>(
         builder: (context, state) {
@@ -251,6 +253,95 @@ class ThemeState extends Equatable {
 
   @override
   List<Object?> get props => [isDarkMode];
+}
+
+
+
+// blocs/user/profile_bloc.dart :
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'profile_event.dart';
+import 'profile_state.dart';
+
+class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
+  final _auth = FirebaseAuth.instance;
+  final _firestore = FirebaseFirestore.instance;
+
+  ProfileBloc() : super(ProfileInitial()) {
+    on<LoadProfile>(_onLoadProfile);
+  }
+
+  Future<void> _onLoadProfile(LoadProfile event, Emitter<ProfileState> emit) async {
+    emit(ProfileLoading());
+    try {
+      final user = _auth.currentUser;
+      if (user == null) throw Exception("User not logged in");
+      
+      final userDoc = await _firestore
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!userDoc.exists) {
+        throw Exception("User data not found");
+      }
+
+      final userData = userDoc.data()!;
+      
+      emit(ProfileLoaded(
+        email: user.email ?? '',
+        garudId: userData['garudId'] ?? '',
+      ));
+    } catch (e) {
+      emit(ProfileError(e.toString()));
+    }
+  }
+}
+
+
+
+// blocs/user/profile_event.dart :
+abstract class ProfileEvent {}
+
+class LoadProfile extends ProfileEvent {}
+
+
+
+// blocs/user/profile_state.dart :
+import 'package:equatable/equatable.dart';
+
+abstract class ProfileState extends Equatable {
+  const ProfileState();
+  
+  @override
+  List<Object?> get props => [];
+}
+
+class ProfileInitial extends ProfileState {}
+
+class ProfileLoading extends ProfileState {}
+
+class ProfileLoaded extends ProfileState {
+  final String email;
+  final String garudId;
+  
+  const ProfileLoaded({
+    required this.email,
+    required this.garudId,
+  });
+  
+  @override
+  List<Object?> get props => [email, garudId];
+}
+
+class ProfileError extends ProfileState {
+  final String message;
+  
+  const ProfileError(this.message);
+  
+  @override
+  List<Object?> get props => [message];
 }
 
 
@@ -963,6 +1054,7 @@ import '../blocs/theme/theme_event.dart';
 import '../blocs/theme/theme_state.dart';
 import 'login_page.dart';
 import 'add_guardians_page.dart';
+import 'profile_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -971,11 +1063,12 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin {
   String? _garudId;
   bool _isLoading = true;
   late TabController _tabController;
-  
+
   @override
   void initState() {
     super.initState();
@@ -985,7 +1078,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     context.read<UserBloc>().add(FetchGuardiansRequested());
     context.read<UserBloc>().add(FetchProtegesRequested());
   }
-  
+
   @override
   void dispose() {
     _tabController.dispose();
@@ -993,6 +1086,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   }
 
   Future<void> _loadUserData() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
@@ -1004,8 +1098,9 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
             .collection('users')
             .doc(user.uid)
             .get();
-        
+
         if (userDoc.exists && userDoc.data()?['garudId'] != null) {
+          if (!mounted) return;
           setState(() {
             _garudId = userDoc.data()!['garudId'];
           });
@@ -1015,6 +1110,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       // Handle error silently
       print('Error loading user data: $e');
     } finally {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -1041,11 +1137,95 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     });
   }
 
+  void _navigateToProfile(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfilePage()),
+    );
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          DrawerHeader(
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const CircleAvatar(
+                  radius: 30,
+                  child: Icon(Icons.person, size: 35),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  FirebaseAuth.instance.currentUser?.email ?? 'User',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                  ),
+                ),
+                if (_garudId != null)
+                  Text(
+                    'Garud ID: $_garudId',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person),
+            title: const Text('My Profile'),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilePage()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.group_add),
+            title: const Text('Add Guardian'),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              _goToAddGuardianPage(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings),
+            title: const Text('Settings'),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              // TODO: Implement settings page
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Logout', style: TextStyle(color: Colors.red)),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              _logout(context);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
+      endDrawer: _buildDrawer(),
       appBar: AppBar(
         title: const Text('Home'),
         actions: [
@@ -1057,6 +1237,12 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                 tooltip: state.isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
               );
             },
+          ),
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu),
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+            ),
           ),
         ],
         bottom: TabBar(
@@ -1149,13 +1335,13 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       ),
     );
   }
-  
+
   Widget _buildGuardiansTab() {
     return BlocBuilder<UserBloc, UserState>(
       buildWhen: (previous, current) {
-        return current is GuardiansLoaded || 
-               current is GuardiansLoadInProgress || 
-               current is GuardianLoadFailed;
+        return current is GuardiansLoaded ||
+            current is GuardiansLoadInProgress ||
+            current is GuardianLoadFailed;
       },
       builder: (context, state) {
         if (state is GuardiansLoadInProgress) {
@@ -1180,8 +1366,8 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
                   icon: const Icon(Icons.delete, color: Colors.red),
                   onPressed: () {
                     context.read<UserBloc>().add(
-                      DeleteGuardianRequested(guardian['uid']!),
-                    );
+                          DeleteGuardianRequested(guardian['uid']!),
+                        );
                   },
                 ),
               );
@@ -1200,81 +1386,103 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     );
   }
 
+  // Updated _buildProtegesTab method in screens/home_page.dart
   Widget _buildProtegesTab() {
-  return BlocBuilder<UserBloc, UserState>(
-    buildWhen: (previous, current) {
-      return current is ProtegesLoaded || 
-             current is ProtegesLoadInProgress || 
-             current is ProtegesLoadFailed;
-    },
-    builder: (context, state) {
-      if (state is ProtegesLoadInProgress) {
-        return const Center(child: CircularProgressIndicator());
-      } else if (state is ProtegesLoaded) {
-        if (state.proteges.isEmpty) {
-          return const Center(
-            child: Text('No proteges yet. Someone has to add you as their guardian.'),
+    return BlocConsumer<UserBloc, UserState>(
+      // Changed from BlocBuilder to BlocConsumer
+      listenWhen: (previous, current) {
+        return current is ProtegeDeleteFailed;
+      },
+      listener: (context, state) {
+        // Display error message if delete operation fails
+        if (state is ProtegeDeleteFailed) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content: Text('Failed to remove protege: ${state.message}')),
           );
         }
-        return ListView.builder(
-          itemCount: state.proteges.length,
-          itemBuilder: (BuildContext context, int index) {
-            final protege = state.proteges[index];
-            return ListTile(
-              leading: const CircleAvatar(
-                child: Icon(Icons.shield),
-              ),
-              title: Text(protege['email'] ?? ''),
-              subtitle: const Text('Protege'),
-              // Add delete option for proteges
-              trailing: IconButton(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                onPressed: () {
-                  // Show confirmation dialog
-                  showDialog(
-                    context: context,
-                    builder: (BuildContext dialogContext) {
-                      return AlertDialog(
-                        title: const Text('Remove Protege'),
-                        content: Text('Are you sure you want to remove ${protege['email']} as your protege? This will also remove you as their guardian.'),
-                        actions: [
-                          TextButton(
-                            child: const Text('Cancel'),
-                            onPressed: () {
-                              Navigator.of(dialogContext).pop();
-                            },
-                          ),
-                          TextButton(
-                            child: const Text('Remove'),
-                            onPressed: () {
-                              context.read<UserBloc>().add(
-                                DeleteProtegeRequested(protege['uid']!),
-                              );
-                              Navigator.of(dialogContext).pop();
-                            },
-                          ),
-                        ],
-                      );
-                    },
-                  );
-                },
-              ),
+      },
+      buildWhen: (previous, current) {
+        return current is ProtegesLoaded ||
+            current is ProtegesLoadInProgress ||
+            current is ProtegesLoadFailed;
+      },
+      builder: (context, state) {
+        if (state is ProtegesLoadInProgress) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (state is ProtegesLoaded) {
+          if (state.proteges.isEmpty) {
+            return const Center(
+              child: Text(
+                  'No proteges yet. Someone has to add you as their guardian.'),
             );
-          },
-        );
-      } else if (state is ProtegesLoadFailed) {
-        return Center(
-          child: Text('Error: ${state.message}'),
-        );
-      } else {
-        return const Center(
-          child: Text('Select the refresh button to load proteges.'),
-        );
-      }
-    },
-  );
-}
+          }
+          return ListView.builder(
+            itemCount: state.proteges.length,
+            itemBuilder: (BuildContext context, int index) {
+              final protege = state.proteges[index];
+              return ListTile(
+                leading: const CircleAvatar(
+                  backgroundColor: Colors.blue,
+                  child: Icon(Icons.shield, color: Colors.white),
+                ),
+                title: Text(protege['email'] ?? ''),
+                subtitle: const Text('Protege'),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () {
+                    // Show confirmation dialog
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext dialogContext) {
+                        return AlertDialog(
+                          title: const Text('Remove Protege'),
+                          content: Text(
+                              'Are you sure you want to remove ${protege['email']} as your protege? This will also remove you as their guardian.'),
+                          actions: [
+                            TextButton(
+                              child: const Text('Cancel'),
+                              onPressed: () {
+                                Navigator.of(dialogContext).pop();
+                              },
+                            ),
+                            TextButton(
+                              child: const Text('Remove'),
+                              onPressed: () {
+                                context.read<UserBloc>().add(
+                                      DeleteProtegeRequested(protege['uid']!),
+                                    );
+                                Navigator.of(dialogContext).pop();
 
+                                // Show a loading indicator while the deletion is being processed
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(const SnackBar(
+                                  content: Text('Removing protege...'),
+                                  duration: Duration(seconds: 1),
+                                ));
+                              },
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+              );
+            },
+          );
+        } else if (state is ProtegesLoadFailed) {
+          return Center(
+            child: Text('Error: ${state.message}'),
+          );
+        } else {
+          return const Center(
+            child: Text('Select the refresh button to load proteges.'),
+          );
+        }
+      },
+    );
+  }
 }
 
 
@@ -1351,6 +1559,135 @@ class LoginPage extends StatelessWidget {
                 child: Text('Don\'t have an account? Sign up'),
               ),
             ]),
+          );
+        },
+      ),
+    );
+  }
+}
+
+
+
+// screens/profile_page.dart :
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../blocs/auth/auth_bloc.dart';
+import '../blocs/auth/auth_event.dart';
+import '../blocs/user/profile_bloc.dart';
+import '../blocs/user/profile_event.dart';
+import '../blocs/user/profile_state.dart';
+
+class ProfilePage extends StatefulWidget {
+  const ProfilePage({Key? key}) : super(key: key);
+
+  @override
+  _ProfilePageState createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  @override
+  void initState() {
+    super.initState();
+    context.read<ProfileBloc>().add(LoadProfile());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Profile'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.logout),
+            onPressed: () {
+              context.read<AuthBloc>().add(LogoutRequested());
+            },
+          ),
+        ],
+      ),
+      body: BlocBuilder<ProfileBloc, ProfileState>(
+        builder: (context, state) {
+          if (state is ProfileLoading || state is ProfileInitial) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          
+          if (state is ProfileError) {
+            return Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Error: ${state.message}'),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      context.read<ProfileBloc>().add(LoadProfile());
+                    },
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            );
+          }
+          
+          if (state is ProfileLoaded) {
+            return SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Center(
+                    child: CircleAvatar(
+                      radius: 50,
+                      backgroundColor: Colors.blue,
+                      child: Icon(Icons.person, size: 50, color: Colors.white),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Email',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextField(
+                    readOnly: true,
+                    controller: TextEditingController(text: state.email),
+                    decoration: const InputDecoration(
+                      hintText: 'Email',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Garud ID',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextField(
+                    readOnly: true,
+                    controller: TextEditingController(text: state.garudId),
+                    decoration: const InputDecoration(
+                      hintText: 'Garud ID',
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Center(
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        // TODO: Implement edit profile later
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Editing profile will be available soon'),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.edit),
+                      label: const Text('Edit Profile'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+          
+          return const Center(
+            child: Text('Something went wrong'),
           );
         },
       ),

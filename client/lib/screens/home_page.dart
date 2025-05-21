@@ -10,6 +10,7 @@ import '../blocs/theme/theme_event.dart';
 import '../blocs/theme/theme_state.dart';
 import 'login_page.dart';
 import 'add_guardians_page.dart';
+import 'profile_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -41,6 +42,7 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _loadUserData() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
     });
@@ -54,6 +56,7 @@ class _HomePageState extends State<HomePage>
             .get();
 
         if (userDoc.exists && userDoc.data()?['garudId'] != null) {
+          if (!mounted) return;
           setState(() {
             _garudId = userDoc.data()!['garudId'];
           });
@@ -63,6 +66,7 @@ class _HomePageState extends State<HomePage>
       // Handle error silently
       print('Error loading user data: $e');
     } finally {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
@@ -89,25 +93,112 @@ class _HomePageState extends State<HomePage>
     });
   }
 
+  void _navigateToProfile(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfilePage()),
+    );
+  }
+
+  Widget _buildDrawer() {
+    return Drawer(
+      child: ListView(
+        padding: EdgeInsets.zero,
+        children: [
+          DrawerHeader(
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const CircleAvatar(
+                  radius: 30,
+                  child: Icon(Icons.person, size: 35),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  FirebaseAuth.instance.currentUser?.email ?? 'User',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                  ),
+                ),
+                if (_garudId != null)
+                  Text(
+                    'Garud ID: $_garudId',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.person),
+            title: const Text('My Profile'),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProfilePage()),
+              );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.group_add),
+            title: const Text('Add Guardian'),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              _goToAddGuardianPage(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.settings),
+            title: const Text('Settings'),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              // TODO: Implement settings page
+            },
+          ),
+          const Divider(),
+          ListTile(
+            leading: const Icon(Icons.logout, color: Colors.red),
+            title: const Text('Logout', style: TextStyle(color: Colors.red)),
+            onTap: () {
+              Navigator.pop(context); // Close the drawer
+              _logout(context);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
 
     return Scaffold(
+      endDrawer: _buildDrawer(),
       appBar: AppBar(
         title: const Text('Home'),
         actions: [
           BlocBuilder<ThemeBloc, ThemeState>(
             builder: (context, state) {
               return IconButton(
-                icon:
-                    Icon(state.isDarkMode ? Icons.light_mode : Icons.dark_mode),
+                icon: Icon(state.isDarkMode ? Icons.light_mode : Icons.dark_mode),
                 onPressed: () => context.read<ThemeBloc>().add(ToggleTheme()),
-                tooltip: state.isDarkMode
-                    ? 'Switch to Light Mode'
-                    : 'Switch to Dark Mode',
+                tooltip: state.isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode',
               );
             },
+          ),
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu),
+              onPressed: () => Scaffold.of(context).openEndDrawer(),
+            ),
           ),
         ],
         bottom: TabBar(
