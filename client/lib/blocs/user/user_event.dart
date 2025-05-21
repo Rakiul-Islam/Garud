@@ -21,3 +21,13 @@ class DeleteGuardianRequested extends UserEvent {
   @override
   List<Object> get props => [uidToRemove];
 }
+
+// New event for fetching proteges
+class FetchProtegesRequested extends UserEvent {}
+
+class DeleteProtegeRequested extends UserEvent {
+  final String uidToRemove;
+  const DeleteProtegeRequested(this.uidToRemove);
+  @override
+  List<Object> get props => [uidToRemove];
+}

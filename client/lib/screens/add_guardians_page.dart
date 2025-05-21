@@ -51,6 +51,10 @@ class _AddGuardianPageState extends State<AddGuardianPage> {
               const SnackBar(content: Text('Guardian added successfully')),
             );
             _emailController.clear();
+            
+            // Refresh both lists when guardian is added successfully
+            context.read<UserBloc>().add(FetchGuardiansRequested());
+            context.read<UserBloc>().add(FetchProtegesRequested());
           } else if (state is GuardianAddFailed || state is GuardianDeleteFailed) {
             final message = (state as dynamic).message;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -76,16 +80,24 @@ class _AddGuardianPageState extends State<AddGuardianPage> {
                 else if (state is GuardiansLoaded && state.guardians.isEmpty)
                   const Text('No guardians added yet.')
                 else if (state is GuardiansLoaded)
-                  ...state.guardians.map(
-                    (guardian) => ListTile(
-                      leading: const Icon(Icons.person),
-                      title: Text(guardian['email'] ?? ''),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => context
-                            .read<UserBloc>()
-                            .add(DeleteGuardianRequested(guardian['uid']!)),
-                      ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: state.guardians.length,
+                      itemBuilder: (context, index) {
+                        final guardian = state.guardians[index];
+                        return ListTile(
+                          leading: const Icon(Icons.person),
+                          title: Text(guardian['email'] ?? ''),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              context.read<UserBloc>().add(
+                                DeleteGuardianRequested(guardian['uid']!)
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ),
                   ),
                 const SizedBox(height: 30),

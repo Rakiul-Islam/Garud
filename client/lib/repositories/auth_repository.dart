@@ -39,6 +39,8 @@ class AuthRepository {
         'token': token,
         'email': email,
         'createdAt': FieldValue.serverTimestamp(),
+        'guardians': [],   // Initialize empty guardians array
+        'proteges': [],    // Initialize empty proteges array
       });
     }
   }
@@ -86,6 +88,8 @@ class AuthRepository {
       'email': email,
       'garudId': garudId,
       'createdAt': FieldValue.serverTimestamp(),
+      'guardians': [],   // Initialize empty guardians array
+      'proteges': [],    // Initialize empty proteges array
     });
     
     // Create the garudId mapping document

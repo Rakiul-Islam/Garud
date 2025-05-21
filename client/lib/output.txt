@@ -268,6 +268,8 @@ class UserBloc extends Bloc<UserEvent, UserState> {
     on<AddGuardianRequested>(_onAddGuardianRequested);
     on<FetchGuardiansRequested>(_onFetchGuardiansRequested);
     on<DeleteGuardianRequested>(_onDeleteGuardianRequested);
+    on<FetchProtegesRequested>(_onFetchProtegesRequested);
+    on<DeleteProtegeRequested>(_onDeleteProtegeRequested);
   }
 
   Future<void> _onAddGuardianRequested(
@@ -277,6 +279,7 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) throw Exception("User not logged in");
 
+      // Find the guardian user by email
       final querySnapshot = await FirebaseFirestore.instance
           .collection('users')
           .where('email', isEqualTo: event.guardianEmail)
@@ -293,12 +296,27 @@ class UserBloc extends Bloc<UserEvent, UserState> {
         throw Exception("You can't add yourself as a guardian");
       }
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .update({
+      // Use a batch write to update both records atomically
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Add guardian to current user's document
+      final currentUserRef =
+          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+
+      batch.update(currentUserRef, {
         'guardians': FieldValue.arrayUnion([guardianUid])
       });
+
+      // Add current user as protege to guardian's document
+      final guardianRef =
+          FirebaseFirestore.instance.collection('users').doc(guardianUid);
+
+      batch.update(guardianRef, {
+        'proteges': FieldValue.arrayUnion([currentUser.uid])
+      });
+
+      // Commit the batch write
+      await batch.commit();
 
       emit(GuardianAdded());
       add(FetchGuardiansRequested()); // refresh list
@@ -325,13 +343,11 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       List<Map<String, String>> tempList = [];
 
       for (String uid in guardianUids) {
-        final guardianDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .get();
+        final guardianDoc =
+            await FirebaseFirestore.instance.collection('users').doc(uid).get();
         if (guardianDoc.exists && guardianDoc.data()?['email'] != null) {
           tempList.add({
-            'UId': uid,
+            'uid': uid,
             'email': guardianDoc.data()!['email'],
           });
         }
@@ -339,7 +355,7 @@ class UserBloc extends Bloc<UserEvent, UserState> {
 
       emit(GuardiansLoaded(tempList));
     } catch (e) {
-      emit(GuardianAddFailed(e.toString()));
+      emit(GuardianLoadFailed(e.toString()));
     }
   }
 
@@ -349,16 +365,98 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) throw Exception("User not logged in");
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .update({
+      // Use a batch write to update both records atomically
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Remove guardian from current user's document
+      final currentUserRef =
+          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+
+      batch.update(currentUserRef, {
         'guardians': FieldValue.arrayRemove([event.uidToRemove])
       });
+
+      // Remove current user as protege from guardian's document
+      final guardianRef =
+          FirebaseFirestore.instance.collection('users').doc(event.uidToRemove);
+
+      batch.update(guardianRef, {
+        'proteges': FieldValue.arrayRemove([currentUser.uid])
+      });
+
+      // Commit the batch write
+      await batch.commit();
 
       add(FetchGuardiansRequested());
     } catch (e) {
       emit(GuardianDeleteFailed(e.toString()));
+    }
+  }
+
+  Future<void> _onFetchProtegesRequested(
+      FetchProtegesRequested event, Emitter<UserState> emit) async {
+    emit(ProtegesLoadInProgress());
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) throw Exception("User not logged in");
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+
+      final protegeUids = List<String>.from(userDoc.data()?['proteges'] ?? []);
+
+      List<Map<String, String>> tempList = [];
+
+      for (String uid in protegeUids) {
+        final protegeDoc =
+            await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        if (protegeDoc.exists && protegeDoc.data()?['email'] != null) {
+          tempList.add({
+            'uid': uid,
+            'email': protegeDoc.data()!['email'],
+          });
+        }
+      }
+
+      emit(ProtegesLoaded(tempList));
+    } catch (e) {
+      emit(ProtegesLoadFailed(e.toString()));
+    }
+  }
+
+  Future<void> _onDeleteProtegeRequested(
+      DeleteProtegeRequested event, Emitter<UserState> emit) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) throw Exception("User not logged in");
+
+      // Use a batch write to update both records atomically
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Remove protege from current user's document
+      final currentUserRef =
+          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+
+      batch.update(currentUserRef, {
+        'proteges': FieldValue.arrayRemove([event.uidToRemove])
+      });
+
+      // Remove current user as guardian from protege's document
+      final protegeRef =
+          FirebaseFirestore.instance.collection('users').doc(event.uidToRemove);
+
+      batch.update(protegeRef, {
+        'guardians': FieldValue.arrayRemove([currentUser.uid])
+      });
+
+      // Commit the batch write
+      await batch.commit();
+
+      add(FetchProtegesRequested());
+    } catch (e) {
+      emit(ProtegeDeleteFailed(e.toString()));
     }
   }
 }
@@ -390,6 +488,16 @@ class DeleteGuardianRequested extends UserEvent {
   List<Object> get props => [uidToRemove];
 }
 
+// New event for fetching proteges
+class FetchProtegesRequested extends UserEvent {}
+
+class DeleteProtegeRequested extends UserEvent {
+  final String uidToRemove;
+  const DeleteProtegeRequested(this.uidToRemove);
+  @override
+  List<Object> get props => [uidToRemove];
+}
+
 
 
 // blocs/user/user_state.dart :
@@ -403,6 +511,7 @@ abstract class UserState extends Equatable {
 
 class UserInitial extends UserState {}
 
+// Guardian States
 class GuardianAddInProgress extends UserState {}
 
 class GuardianAdded extends UserState {}
@@ -423,9 +532,40 @@ class GuardiansLoaded extends UserState {
   List<Object?> get props => [guardians];
 }
 
+class GuardianLoadFailed extends UserState {
+  final String message;
+  const GuardianLoadFailed(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+
 class GuardianDeleteFailed extends UserState {
   final String message;
   const GuardianDeleteFailed(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+
+// Protege States
+class ProtegesLoadInProgress extends UserState {}
+
+class ProtegesLoaded extends UserState {
+  final List<Map<String, String>> proteges;
+  const ProtegesLoaded(this.proteges);
+  @override
+  List<Object?> get props => [proteges];
+}
+
+class ProtegesLoadFailed extends UserState {
+  final String message;
+  const ProtegesLoadFailed(this.message);
+  @override
+  List<Object?> get props => [message];
+}
+
+class ProtegeDeleteFailed extends UserState {
+  final String message;
+  const ProtegeDeleteFailed(this.message);
   @override
   List<Object?> get props => [message];
 }
@@ -605,6 +745,8 @@ class AuthRepository {
         'token': token,
         'email': email,
         'createdAt': FieldValue.serverTimestamp(),
+        'guardians': [],   // Initialize empty guardians array
+        'proteges': [],    // Initialize empty proteges array
       });
     }
   }
@@ -652,6 +794,8 @@ class AuthRepository {
       'email': email,
       'garudId': garudId,
       'createdAt': FieldValue.serverTimestamp(),
+      'guardians': [],   // Initialize empty guardians array
+      'proteges': [],    // Initialize empty proteges array
     });
     
     // Create the garudId mapping document
@@ -727,6 +871,10 @@ class _AddGuardianPageState extends State<AddGuardianPage> {
               const SnackBar(content: Text('Guardian added successfully')),
             );
             _emailController.clear();
+            
+            // Refresh both lists when guardian is added successfully
+            context.read<UserBloc>().add(FetchGuardiansRequested());
+            context.read<UserBloc>().add(FetchProtegesRequested());
           } else if (state is GuardianAddFailed || state is GuardianDeleteFailed) {
             final message = (state as dynamic).message;
             ScaffoldMessenger.of(context).showSnackBar(
@@ -752,16 +900,24 @@ class _AddGuardianPageState extends State<AddGuardianPage> {
                 else if (state is GuardiansLoaded && state.guardians.isEmpty)
                   const Text('No guardians added yet.')
                 else if (state is GuardiansLoaded)
-                  ...state.guardians.map(
-                    (guardian) => ListTile(
-                      leading: const Icon(Icons.person),
-                      title: Text(guardian['email'] ?? ''),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        onPressed: () => context
-                            .read<UserBloc>()
-                            .add(DeleteGuardianRequested(guardian['uid']!)),
-                      ),
+                  Expanded(
+                    child: ListView.builder(
+                      itemCount: state.guardians.length,
+                      itemBuilder: (context, index) {
+                        final guardian = state.guardians[index];
+                        return ListTile(
+                          leading: const Icon(Icons.person),
+                          title: Text(guardian['email'] ?? ''),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              context.read<UserBloc>().add(
+                                DeleteGuardianRequested(guardian['uid']!)
+                              );
+                            },
+                          ),
+                        );
+                      },
                     ),
                   ),
                 const SizedBox(height: 30),
@@ -799,6 +955,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../blocs/user/user_bloc.dart';
+import '../blocs/user/user_event.dart';
+import '../blocs/user/user_state.dart';
 import '../blocs/theme/theme_bloc.dart';
 import '../blocs/theme/theme_event.dart';
 import '../blocs/theme/theme_state.dart';
@@ -812,14 +971,25 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
   String? _garudId;
   bool _isLoading = true;
-
+  late TabController _tabController;
+  
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 2, vsync: this);
     _loadUserData();
+    // Fetch both guardians and proteges when page loads
+    context.read<UserBloc>().add(FetchGuardiansRequested());
+    context.read<UserBloc>().add(FetchProtegesRequested());
+  }
+  
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserData() async {
@@ -864,7 +1034,11 @@ class _HomePageState extends State<HomePage> {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const AddGuardianPage()),
-    );
+    ).then((_) {
+      // Refresh data when returning from add guardian page
+      context.read<UserBloc>().add(FetchGuardiansRequested());
+      context.read<UserBloc>().add(FetchProtegesRequested());
+    });
   }
 
   @override
@@ -885,61 +1059,222 @@ class _HomePageState extends State<HomePage> {
             },
           ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(text: 'Guardians'),
+            Tab(text: 'Proteges'),
+          ],
+        ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text('Welcome, ${user?.email ?? "User"}!',
-                      style: const TextStyle(fontSize: 20)),
-                  const SizedBox(height: 10),
-                  if (_garudId != null)
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Column(
-                            children: [
-                              const Text(
-                                'Your Garud ID',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    children: [
+                      Text('Welcome, ${user?.email ?? "User"}!',
+                          style: const TextStyle(fontSize: 20)),
+                      const SizedBox(height: 10),
+                      if (_garudId != null)
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              children: [
+                                const Text(
+                                  'Your Garud ID',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _garudId!,
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w500,
+                                const SizedBox(height: 8),
+                                Text(
+                                  _garudId!,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                  const SizedBox(height: 20),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.group_add),
-                    label: const Text('Add Guardian'),
-                    onPressed: () => _goToAddGuardianPage(context),
+                    ],
                   ),
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.logout),
-                    label: const Text('Logout'),
-                    onPressed: () => _logout(context),
+                ),
+                Expanded(
+                  child: TabBarView(
+                    controller: _tabController,
+                    children: [
+                      // Guardians Tab
+                      _buildGuardiansTab(),
+                      // Proteges Tab
+                      _buildProtegesTab(),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => _goToAddGuardianPage(context),
+        child: const Icon(Icons.group_add),
+        tooltip: 'Add Guardian',
+      ),
+      bottomNavigationBar: BottomAppBar(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh),
+                label: const Text('Refresh'),
+                onPressed: () {
+                  context.read<UserBloc>().add(FetchGuardiansRequested());
+                  context.read<UserBloc>().add(FetchProtegesRequested());
+                },
+              ),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.logout),
+                label: const Text('Logout'),
+                onPressed: () => _logout(context),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
+  
+  Widget _buildGuardiansTab() {
+    return BlocBuilder<UserBloc, UserState>(
+      buildWhen: (previous, current) {
+        return current is GuardiansLoaded || 
+               current is GuardiansLoadInProgress || 
+               current is GuardianLoadFailed;
+      },
+      builder: (context, state) {
+        if (state is GuardiansLoadInProgress) {
+          return const Center(child: CircularProgressIndicator());
+        } else if (state is GuardiansLoaded) {
+          if (state.guardians.isEmpty) {
+            return const Center(
+              child: Text('No guardians added yet.'),
+            );
+          }
+          return ListView.builder(
+            itemCount: state.guardians.length,
+            itemBuilder: (BuildContext context, int index) {
+              final guardian = state.guardians[index];
+              return ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.person),
+                ),
+                title: Text(guardian['email'] ?? ''),
+                subtitle: const Text('Guardian'),
+                trailing: IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () {
+                    context.read<UserBloc>().add(
+                      DeleteGuardianRequested(guardian['uid']!),
+                    );
+                  },
+                ),
+              );
+            },
+          );
+        } else if (state is GuardianLoadFailed) {
+          return Center(
+            child: Text('Error: ${state.message}'),
+          );
+        } else {
+          return const Center(
+            child: Text('Select the refresh button to load guardians.'),
+          );
+        }
+      },
+    );
+  }
+
+  Widget _buildProtegesTab() {
+  return BlocBuilder<UserBloc, UserState>(
+    buildWhen: (previous, current) {
+      return current is ProtegesLoaded || 
+             current is ProtegesLoadInProgress || 
+             current is ProtegesLoadFailed;
+    },
+    builder: (context, state) {
+      if (state is ProtegesLoadInProgress) {
+        return const Center(child: CircularProgressIndicator());
+      } else if (state is ProtegesLoaded) {
+        if (state.proteges.isEmpty) {
+          return const Center(
+            child: Text('No proteges yet. Someone has to add you as their guardian.'),
+          );
+        }
+        return ListView.builder(
+          itemCount: state.proteges.length,
+          itemBuilder: (BuildContext context, int index) {
+            final protege = state.proteges[index];
+            return ListTile(
+              leading: const CircleAvatar(
+                child: Icon(Icons.shield),
+              ),
+              title: Text(protege['email'] ?? ''),
+              subtitle: const Text('Protege'),
+              // Add delete option for proteges
+              trailing: IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red),
+                onPressed: () {
+                  // Show confirmation dialog
+                  showDialog(
+                    context: context,
+                    builder: (BuildContext dialogContext) {
+                      return AlertDialog(
+                        title: const Text('Remove Protege'),
+                        content: Text('Are you sure you want to remove ${protege['email']} as your protege? This will also remove you as their guardian.'),
+                        actions: [
+                          TextButton(
+                            child: const Text('Cancel'),
+                            onPressed: () {
+                              Navigator.of(dialogContext).pop();
+                            },
+                          ),
+                          TextButton(
+                            child: const Text('Remove'),
+                            onPressed: () {
+                              context.read<UserBloc>().add(
+                                DeleteProtegeRequested(protege['uid']!),
+                              );
+                              Navigator.of(dialogContext).pop();
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+            );
+          },
+        );
+      } else if (state is ProtegesLoadFailed) {
+        return Center(
+          child: Text('Error: ${state.message}'),
+        );
+      } else {
+        return const Center(
+          child: Text('Select the refresh button to load proteges.'),
+        );
+      }
+    },
+  );
+}
+
 }
 
 

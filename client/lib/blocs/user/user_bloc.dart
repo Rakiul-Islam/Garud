@@ -10,6 +10,8 @@ class UserBloc extends Bloc<UserEvent, UserState> {
     on<AddGuardianRequested>(_onAddGuardianRequested);
     on<FetchGuardiansRequested>(_onFetchGuardiansRequested);
     on<DeleteGuardianRequested>(_onDeleteGuardianRequested);
+    on<FetchProtegesRequested>(_onFetchProtegesRequested);
+    on<DeleteProtegeRequested>(_onDeleteProtegeRequested);
   }
 
   Future<void> _onAddGuardianRequested(
@@ -19,6 +21,7 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) throw Exception("User not logged in");
 
+      // Find the guardian user by email
       final querySnapshot = await FirebaseFirestore.instance
           .collection('users')
           .where('email', isEqualTo: event.guardianEmail)
@@ -35,12 +38,27 @@ class UserBloc extends Bloc<UserEvent, UserState> {
         throw Exception("You can't add yourself as a guardian");
       }
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .update({
+      // Use a batch write to update both records atomically
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Add guardian to current user's document
+      final currentUserRef =
+          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+
+      batch.update(currentUserRef, {
         'guardians': FieldValue.arrayUnion([guardianUid])
       });
+
+      // Add current user as protege to guardian's document
+      final guardianRef =
+          FirebaseFirestore.instance.collection('users').doc(guardianUid);
+
+      batch.update(guardianRef, {
+        'proteges': FieldValue.arrayUnion([currentUser.uid])
+      });
+
+      // Commit the batch write
+      await batch.commit();
 
       emit(GuardianAdded());
       add(FetchGuardiansRequested()); // refresh list
@@ -67,13 +85,11 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       List<Map<String, String>> tempList = [];
 
       for (String uid in guardianUids) {
-        final guardianDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(uid)
-            .get();
+        final guardianDoc =
+            await FirebaseFirestore.instance.collection('users').doc(uid).get();
         if (guardianDoc.exists && guardianDoc.data()?['email'] != null) {
           tempList.add({
-            'UId': uid,
+            'uid': uid,
             'email': guardianDoc.data()!['email'],
           });
         }
@@ -81,7 +97,7 @@ class UserBloc extends Bloc<UserEvent, UserState> {
 
       emit(GuardiansLoaded(tempList));
     } catch (e) {
-      emit(GuardianAddFailed(e.toString()));
+      emit(GuardianLoadFailed(e.toString()));
     }
   }
 
@@ -91,16 +107,98 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) throw Exception("User not logged in");
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(currentUser.uid)
-          .update({
+      // Use a batch write to update both records atomically
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Remove guardian from current user's document
+      final currentUserRef =
+          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+
+      batch.update(currentUserRef, {
         'guardians': FieldValue.arrayRemove([event.uidToRemove])
       });
+
+      // Remove current user as protege from guardian's document
+      final guardianRef =
+          FirebaseFirestore.instance.collection('users').doc(event.uidToRemove);
+
+      batch.update(guardianRef, {
+        'proteges': FieldValue.arrayRemove([currentUser.uid])
+      });
+
+      // Commit the batch write
+      await batch.commit();
 
       add(FetchGuardiansRequested());
     } catch (e) {
       emit(GuardianDeleteFailed(e.toString()));
+    }
+  }
+
+  Future<void> _onFetchProtegesRequested(
+      FetchProtegesRequested event, Emitter<UserState> emit) async {
+    emit(ProtegesLoadInProgress());
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) throw Exception("User not logged in");
+
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(currentUser.uid)
+          .get();
+
+      final protegeUids = List<String>.from(userDoc.data()?['proteges'] ?? []);
+
+      List<Map<String, String>> tempList = [];
+
+      for (String uid in protegeUids) {
+        final protegeDoc =
+            await FirebaseFirestore.instance.collection('users').doc(uid).get();
+        if (protegeDoc.exists && protegeDoc.data()?['email'] != null) {
+          tempList.add({
+            'uid': uid,
+            'email': protegeDoc.data()!['email'],
+          });
+        }
+      }
+
+      emit(ProtegesLoaded(tempList));
+    } catch (e) {
+      emit(ProtegesLoadFailed(e.toString()));
+    }
+  }
+
+  Future<void> _onDeleteProtegeRequested(
+      DeleteProtegeRequested event, Emitter<UserState> emit) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) throw Exception("User not logged in");
+
+      // Use a batch write to update both records atomically
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Remove protege from current user's document
+      final currentUserRef =
+          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+
+      batch.update(currentUserRef, {
+        'proteges': FieldValue.arrayRemove([event.uidToRemove])
+      });
+
+      // Remove current user as guardian from protege's document
+      final protegeRef =
+          FirebaseFirestore.instance.collection('users').doc(event.uidToRemove);
+
+      batch.update(protegeRef, {
+        'guardians': FieldValue.arrayRemove([currentUser.uid])
+      });
+
+      // Commit the batch write
+      await batch.commit();
+
+      add(FetchProtegesRequested());
+    } catch (e) {
+      emit(ProtegeDeleteFailed(e.toString()));
     }
   }
 }
