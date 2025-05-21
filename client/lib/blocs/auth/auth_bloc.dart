@@ -33,14 +33,16 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
         emit(AuthFailure(message: e.toString()));
       }
     });
-    
-    on<SignupWithGarudIdRequested>((event, emit) async {
+      on<SignupWithGarudIdRequested>((event, emit) async {
       emit(AuthLoading());
       try {
         await authRepository.signupWithGarudId(
-          event.email, 
-          event.password, 
-          event.garudId
+          event.email,
+          event.password,
+          event.garudId,
+          event.name,
+          event.phoneNumber,
+          event.enableAlerts
         );
         emit(AuthSuccess());
       } catch (e) {

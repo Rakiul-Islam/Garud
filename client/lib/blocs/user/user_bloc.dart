@@ -1,11 +1,14 @@
 import 'package:bloc/bloc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:garudclient/services/fcm_service.dart';
 
 import 'user_event.dart';
 import 'user_state.dart';
 
 class UserBloc extends Bloc<UserEvent, UserState> {
+  final FCMService _fcmService = FCMService(); // Create FCM service instance
+  
   UserBloc() : super(UserInitial()) {
     on<AddGuardianRequested>(_onAddGuardianRequested);
     on<FetchGuardiansRequested>(_onFetchGuardiansRequested);
@@ -34,9 +37,9 @@ class UserBloc extends Bloc<UserEvent, UserState> {
 
       final guardianUid = querySnapshot.docs.first.id;
 
-      if (guardianUid == currentUser.uid) {
-        throw Exception("You can't add yourself as a guardian");
-      }
+      // if (guardianUid == currentUser.uid) {
+      //   throw Exception("You can't add yourself as a guardian");
+      // }
 
       // Use a batch write to update both records atomically
       final batch = FirebaseFirestore.instance.batch();
@@ -44,6 +47,10 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       // Add guardian to current user's document
       final currentUserRef =
           FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+      
+      // Get current user data for notification
+      final currentUserDoc = await currentUserRef.get();
+      final currentUserEmail = currentUserDoc.data()?['email'] ?? currentUser.email ?? 'A user';
 
       batch.update(currentUserRef, {
         'guardians': FieldValue.arrayUnion([guardianUid])
@@ -59,6 +66,18 @@ class UserBloc extends Bloc<UserEvent, UserState> {
 
       // Commit the batch write
       await batch.commit();
+
+      // Send notification to the guardian
+      final guardianData = querySnapshot.docs.first.data();
+      final guardianToken = guardianData['token'];
+      
+      if (guardianToken != null) {
+        await _fcmService.sendNotification(
+          targetToken: guardianToken,
+          title: 'New Protege Added',
+          body: '$currentUserEmail has added you as their guardian',
+        );
+      }
 
       emit(GuardianAdded());
       add(FetchGuardiansRequested()); // refresh list
@@ -180,6 +199,10 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       // Remove protege from current user's document
       final currentUserRef =
           FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+      
+      // Get current user data for notification
+      final currentUserDoc = await currentUserRef.get();
+      final currentUserEmail = currentUserDoc.data()?['email'] ?? currentUser.email ?? 'A guardian';
 
       batch.update(currentUserRef, {
         'proteges': FieldValue.arrayRemove([event.uidToRemove])
@@ -192,6 +215,19 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       batch.update(protegeRef, {
         'guardians': FieldValue.arrayRemove([currentUser.uid])
       });
+      
+      // Get protege data for notification
+      final protegeDoc = await protegeRef.get();
+      final protegeToken = protegeDoc.data()?['token'];
+      
+      // Send notification to protege about removal
+      if (protegeToken != null) {
+        await _fcmService.sendNotification(
+          targetToken: protegeToken,
+          title: 'Guardian Relationship Ended',
+          body: '$currentUserEmail is no longer your guardian',
+        );
+      }
 
       // Commit the batch write
       await batch.commit();

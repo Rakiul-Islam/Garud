@@ -25,13 +25,14 @@ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
 
       if (!userDoc.exists) {
         throw Exception("User data not found");
-      }
-
-      final userData = userDoc.data()!;
+      }      final userData = userDoc.data()!;
       
       emit(ProfileLoaded(
+        name: userData['name'] ?? '',
         email: user.email ?? '',
+        phoneNumber: userData['phoneNumber'] ?? '',
         garudId: userData['garudId'] ?? '',
+        enableAlerts: userData['enableAlerts'] ?? true,
       ));
     } catch (e) {
       emit(ProfileError(e.toString()));

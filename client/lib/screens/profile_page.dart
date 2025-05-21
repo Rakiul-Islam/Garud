@@ -63,8 +63,7 @@ class _ProfilePageState extends State<ProfilePage> {
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Center(
+                children: [                  const Center(
                     child: CircleAvatar(
                       radius: 50,
                       backgroundColor: Colors.blue,
@@ -72,6 +71,18 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  const Text(
+                    'Name',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextField(
+                    readOnly: true,
+                    controller: TextEditingController(text: state.name),
+                    decoration: const InputDecoration(
+                      hintText: 'Name',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
                   const Text(
                     'Email',
                     style: TextStyle(fontWeight: FontWeight.bold),
@@ -85,6 +96,18 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                   const SizedBox(height: 16),
                   const Text(
+                    'Phone Number',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextField(
+                    readOnly: true,
+                    controller: TextEditingController(text: state.phoneNumber),
+                    decoration: const InputDecoration(
+                      hintText: 'Phone Number',
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
                     'Garud ID',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
@@ -94,6 +117,12 @@ class _ProfilePageState extends State<ProfilePage> {
                     decoration: const InputDecoration(
                       hintText: 'Garud ID',
                     ),
+                  ),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    title: const Text('Alert Notifications'),
+                    value: state.enableAlerts,
+                    onChanged: null, // Read-only
                   ),
                   const SizedBox(height: 24),
                   Center(

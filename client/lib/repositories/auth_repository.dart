@@ -44,8 +44,7 @@ class AuthRepository {
       });
     }
   }
-  
-  Future<void> signupWithGarudId(String email, String password, String garudId) async {
+    Future<void> signupWithGarudId(String email, String password, String garudId, String name, String phoneNumber, bool enableAlerts) async {
     // Run validation checks again to ensure Garud ID is valid and not already assigned
     final validIdDoc = await _firestore
         .collection('garudIdMap')
@@ -82,12 +81,16 @@ class AuthRepository {
     final batch = _firestore.batch();
     
     // Create the user document
-    final userRef = _firestore.collection('users').doc(userCredential.user!.uid);
-    batch.set(userRef, {
+    final userRef = _firestore.collection('users').doc(userCredential.user!.uid);    batch.set(userRef, {
       'token': token,
       'email': email,
       'garudId': garudId,
+      'name': name,
+      'phoneNumber': phoneNumber,
+      'enableAlerts': enableAlerts,
       'createdAt': FieldValue.serverTimestamp(),
+      'lastLogin': FieldValue.serverTimestamp(),
+      'status': 'active',
       'guardians': [],   // Initialize empty guardians array
       'proteges': [],    // Initialize empty proteges array
     });
