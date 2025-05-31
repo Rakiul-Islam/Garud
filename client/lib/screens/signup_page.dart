@@ -228,7 +228,7 @@ class _SignupPageState extends State<SignupPage> {  final _emailController = Tex
                     labelText: 'Garud ID',
                     border: OutlineInputBorder(),
                     errorText: _garudIdError,
-                    helperText: 'Enter a valid Garud ID (e.g. Garud001)',
+                    helperText: 'Enter a valid Garud ID (e.g. garud001)',
                   ),
                 ),
                 SizedBox(height: 16),

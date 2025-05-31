@@ -15,13 +15,14 @@ class AuthRepository {
     final userCredential = await _auth.signInWithEmailAndPassword(
         email: email, password: password);
 
-    String? token = await FirebaseMessaging.instance.getToken();
-
-    if (token != null) {
+    String? token = await FirebaseMessaging.instance.getToken();    if (token != null) {
       await _firestore
           .collection('users')
           .doc(userCredential.user!.uid)
-          .set({'token': token}, SetOptions(merge: true));
+          .set({
+            'token': token,
+            'lastLogin': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
     }
   }
 

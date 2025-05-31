@@ -35,7 +35,6 @@ credentials = service_account.Credentials.from_service_account_file(
 # Setup Firestore client
 db = firestore.Client(credentials=credentials, project=PROJECT_ID)
 
-
 # Load face encodings
 with open(ENCODINGS_FILE, "rb") as f:
     data = pickle.load(f)
@@ -144,17 +143,24 @@ def process_frames(input_queue, output_queue, client_id):
             # Add client ID watermark
             cv2.putText(frame, client_id[:8], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-            # Update output
-            if output_queue.full():
-                output_queue.get_nowait()
-            output_queue.put(frame)
+            # Update output - Always put processed frame
+            try:
+                if output_queue.full():
+                    output_queue.get_nowait()
+                output_queue.put(frame)
+            except:
+                pass  # Queue might be closed
             frame_count += 1
 
     except Exception as e:
         print(f"Processor error for {client_id}: {str(e)}")
     finally:
         print(f"Closing processor for {client_id}")
-        output_queue.put(None)
+        # Put sentinel value to signal end
+        try:
+            output_queue.put(None, block=False)
+        except:
+            pass
 
 def get_access_token():
     auth_req = GoogleRequest()
@@ -192,7 +198,6 @@ def send_notification(uid, fcm_token, detectedData, mod):
     response = requests.post(url, headers=headers, data=json.dumps(message_payload))
     return response.status_code, response.text
 
-
 def send_notifications_to_guardians(uid, detectedData):
     try:
         user_doc = db.collection("users").document(uid).get()
@@ -221,96 +226,174 @@ def send_notifications_to_guardians(uid, detectedData):
     except Exception as e:
         print(f"Error sending notification to guardians of {uid}: {e}")
 
-
-
 def generate_video(client_id):
+    print(f"Starting video feed for {client_id}")
+    frame_timeout = 10  # seconds
+    last_frame_time = time.time()
+    
     while True:
         try:
+            # Check if client still exists and is running
             with clients_lock:
                 client_data = clients.get(client_id)
                 if not client_data or not client_data['running']:
+                    print(f"Client {client_id} not found or not running, stopping video feed")
                     break
                 output_queue = client_data['output_queue']
 
-            frame = output_queue.get(timeout=1)
-            if frame is None:
-                break
-
-            ret, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
-            if ret:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            try:
+                frame = output_queue.get(timeout=1)
+                current_time = time.time()
                 
-        except queue.Empty:
-            # Send keep-alive frame
-            gray_frame = np.zeros((480, 640, 3), dtype=np.uint8)
-            cv2.putText(gray_frame, "Waiting for frames...", (160, 240), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-            ret, jpeg = cv2.imencode('.jpg', gray_frame)
-            if ret:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                if frame is None:
+                    print(f"Received None frame for {client_id}, ending stream")
+                    break
+                    
+                last_frame_time = current_time
+                
+                # Encode and yield frame
+                ret, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                if ret:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                
+            except queue.Empty:
+                # Check if we've been waiting too long for frames
+                if time.time() - last_frame_time > frame_timeout:
+                    print(f"No frames received for {client_id} in {frame_timeout} seconds")
+                    break
+                    
+                # Send keep-alive frame
+                gray_frame = np.zeros((480, 640, 3), dtype=np.uint8)
+                cv2.putText(gray_frame, f"Waiting for {client_id[:8]}...", (160, 220), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(gray_frame, "No frames received", (180, 260), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150, 150, 150), 1)
+                
+                ret, jpeg = cv2.imencode('.jpg', gray_frame)
+                if ret:
+                    yield (b'--frame\r\n'
+                           b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+                
         except Exception as e:
             print(f"Stream error for {client_id}: {str(e)}")
             break
+    
+    print(f"Video feed ended for {client_id}")
 
 @app.route('/video_feed/<client_id>')
 def video_feed(client_id):
+    # Check if client exists before starting video feed
+    with clients_lock:
+        if client_id not in clients:
+            return f"Client {client_id} not found", 404
+    
     return Response(generate_video(client_id), 
                    mimetype='multipart/x-mixed-replace; boundary=frame')
 
-async def handle_websocket(websocket):
-    client_id = await websocket.recv()
-    input_queue = queue.Queue(maxsize=2)
-    output_queue = queue.Queue(maxsize=2)
-
-    processing_thread = threading.Thread(
-        target=process_frames,
-        args=(input_queue, output_queue, client_id),
-        daemon=True
-    )
-    processing_thread.start()
-
+@app.route('/status/<client_id>')
+def client_status(client_id):
+    """Check if a client is connected and active"""
     with clients_lock:
-        clients[client_id] = {
-            'input_queue': input_queue,
-            'output_queue': output_queue,
-            'running': True,
-            'thread': processing_thread
-        }
+        if client_id in clients and clients[client_id]['running']:
+            return jsonify({"status": "active", "client_id": client_id})
+        else:
+            return jsonify({"status": "inactive", "client_id": client_id}), 404
 
+def cleanup_client(client_id):
+    """Properly cleanup client resources"""
+    print(f"Starting cleanup for {client_id}")
+    with clients_lock:
+        if client_id in clients:
+            client_data = clients[client_id]
+            client_data['running'] = False
+            
+            # Clear input queue
+            while not client_data['input_queue'].empty():
+                try:
+                    client_data['input_queue'].get_nowait()
+                except queue.Empty:
+                    break
+            
+            # Signal output queue to stop
+            try:
+                client_data['output_queue'].put(None, block=False)
+            except queue.Full:
+                pass
+            
+            # Wait a bit for thread to finish
+            if 'thread' in client_data and client_data['thread'].is_alive():
+                client_data['thread'].join(timeout=2)
+            
+            del clients[client_id]
+            print(f"Cleanup completed for {client_id}")
+
+async def handle_websocket(websocket):
+    client_id = None
     try:
+        client_id = await websocket.recv()
+        print(f"New connection attempt from {client_id}")
+        
+        # Clean up any existing connection with same ID
+        cleanup_client(client_id)
+        
+        input_queue = queue.Queue(maxsize=5)  # Increased queue size
+        output_queue = queue.Queue(maxsize=5)
+
+        processing_thread = threading.Thread(
+            target=process_frames,
+            args=(input_queue, output_queue, client_id),
+            daemon=True
+        )
+        processing_thread.start()
+
+        with clients_lock:
+            clients[client_id] = {
+                'input_queue': input_queue,
+                'output_queue': output_queue,
+                'running': True,
+                'thread': processing_thread,
+                'websocket': websocket
+            }
+
         await websocket.send("REGISTRATION_SUCCESS")
-        print(f"New client connected: {client_id}")
+        print(f"Client registered successfully: {client_id}")
 
         while True:
             message = await websocket.recv()
             if isinstance(message, str):
                 if message == "PING":
                     await websocket.send("PONG")
+                elif message == "DISCONNECT":
+                    print(f"Client {client_id} requested disconnect")
+                    break
                 continue
 
             np_array = np.frombuffer(message, dtype=np.uint8)
             frame = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
             
             if frame is not None:
-                if input_queue.full():
-                    input_queue.get_nowait()
-                input_queue.put(frame)
+                # Check if client is still active
+                with clients_lock:
+                    if client_id not in clients or not clients[client_id]['running']:
+                        break
+                        
+                try:
+                    if input_queue.full():
+                        input_queue.get_nowait()  # Remove oldest frame
+                    input_queue.put(frame, block=False)
+                except queue.Full:
+                    pass  # Skip frame if queue is full
             else:
                 print(f"Invalid frame from {client_id}")
 
     except websockets.exceptions.ConnectionClosed as e:
         print(f"Client {client_id} disconnected: {e.code}")
+    except Exception as e:
+        print(f"WebSocket error for {client_id}: {str(e)}")
     finally:
-        with clients_lock:
-            if client_id in clients:
-                print(f"Cleaning up {client_id}")
-                clients[client_id]['running'] = False
-                while not clients[client_id]['input_queue'].empty():
-                    clients[client_id]['input_queue'].get()
-                clients[client_id]['output_queue'].put(None)
-                del clients[client_id]
+        if client_id:
+            cleanup_client(client_id)
 
 async def main():
     local_ip = socket.gethostbyname(socket.gethostname())
@@ -320,7 +403,7 @@ async def main():
 
 if __name__ == "__main__":
     flask_thread = threading.Thread(
-        target=lambda: app.run(host="0.0.0.0", port=5000, threaded=True),
+        target=lambda: app.run(host="0.0.0.0", port=5000, threaded=True, debug=False),
         daemon=True
     )
     flask_thread.start()
@@ -333,6 +416,4 @@ if __name__ == "__main__":
         running = False
         with clients_lock:
             for cid in list(clients.keys()):
-                clients[cid]['running'] = False
-                clients[cid]['output_queue'].put(None)
-                del clients[cid]
+                cleanup_client(cid)

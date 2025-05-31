@@ -8,12 +8,12 @@
 const char* ssid = WIFI_SSID; // your wifi name from the config header file
 const char* password = WIFI_PASSWORD; // password of your wifi from the config header file
 
-const char* garudID = "V2ur6DpdX9BCA5KS2NH6"; // garudID for rakiulmalda96@gmail.com
+const char* garudID = "garud002"; // garudID for rakiulmalda96@gmail.com
 
 // TODO: Implement loading WiFi data from a file on the SD card
 
 // WebSocket server details
-const char* websocket_server_host = "192.168.151.131"; // ip of the running python backend server
+const char* websocket_server_host = "192.168.172.131"; // ip of the running python backend server
 const int websocket_server_port = 8888;
 
 // Camera configuration
