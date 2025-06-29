@@ -13,7 +13,7 @@ class AuthWrapper extends StatelessWidget {
     return BlocBuilder<AuthBloc, AuthState>(
       builder: (context, state) {
         if (state is AuthSuccess) {
-          return const HomePage();
+          return HomePage(user : state.user);
         } else if (state is AuthLoading) {
           return const Scaffold(
             body: Center(

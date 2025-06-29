@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:garudclient/repositories/auth_repository.dart';
-import 'dart:async';
 import 'auth_event.dart';
 import 'auth_state.dart';
 
@@ -15,7 +15,8 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       try {
         final isLoggedIn = await authRepository.isLoggedIn();
         if (isLoggedIn) {
-          emit(AuthSuccess());
+          final user = await authRepository.getCurrentUser();
+          emit(AuthSuccess(user: user));
         } else {
           emit(AuthInitial());
         }
@@ -28,12 +29,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       emit(AuthLoading());
       try {
         await authRepository.signup(event.email, event.password);
-        emit(AuthSuccess());
+        emit(SignupSuccess());
       } catch (e) {
         emit(AuthFailure(message: e.toString()));
       }
     });
-      on<SignupWithGarudIdRequested>((event, emit) async {
+
+    on<SignupWithGarudIdRequested>((event, emit) async {
       emit(AuthLoading());
       try {
         await authRepository.signupWithGarudId(
@@ -42,9 +44,9 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
           event.garudId,
           event.name,
           event.phoneNumber,
-          event.enableAlerts
+          event.enableAlerts,
         );
-        emit(AuthSuccess());
+        emit(SignupSuccess());
       } catch (e) {
         emit(AuthFailure(message: e.toString()));
       }
@@ -53,8 +55,11 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
     on<LoginRequested>((event, emit) async {
       emit(AuthLoading());
       try {
-        await authRepository.login(event.email, event.password);
-        emit(AuthSuccess());
+        final user = await authRepository.login(
+          email: event.email,
+          password: event.password,
+        );
+        emit(AuthSuccess(user: user));
       } catch (e) {
         emit(AuthFailure(message: e.toString()));
       }
@@ -70,16 +75,13 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       }
     });
 
-    // Add this to check auth status when bloc initializes
+    // Emit current auth status on init
     add(CheckAuthStatus());
 
     // Listen to Firebase Auth state changes
-    _authStateSubscription = FirebaseAuth.instance.authStateChanges().listen((user) {
-      if (user != null) {
-        add(CheckAuthStatus());
-      } else {
-        add(CheckAuthStatus());
-      }
+    _authStateSubscription =
+        FirebaseAuth.instance.authStateChanges().listen((user) {
+      add(CheckAuthStatus());
     });
   }
 

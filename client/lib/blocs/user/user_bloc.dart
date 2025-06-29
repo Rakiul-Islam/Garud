@@ -8,7 +8,7 @@ import 'user_state.dart';
 
 class UserBloc extends Bloc<UserEvent, UserState> {
   final FCMService _fcmService = FCMService(); // Create FCM service instance
-  
+
   UserBloc() : super(UserInitial()) {
     on<AddGuardianRequested>(_onAddGuardianRequested);
     on<FetchGuardiansRequested>(_onFetchGuardiansRequested);
@@ -47,10 +47,11 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       // Add guardian to current user's document
       final currentUserRef =
           FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
-      
+
       // Get current user data for notification
       final currentUserDoc = await currentUserRef.get();
-      final currentUserEmail = currentUserDoc.data()?['email'] ?? currentUser.email ?? 'A user';
+      final currentUserEmail =
+          currentUserDoc.data()?['email'] ?? currentUser.email ?? 'A user';
 
       batch.update(currentUserRef, {
         'guardians': FieldValue.arrayUnion([guardianUid])
@@ -70,7 +71,7 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       // Send notification to the guardian
       final guardianData = querySnapshot.docs.first.data();
       final guardianToken = guardianData['token'];
-      
+
       if (guardianToken != null) {
         await _fcmService.sendNotification(
           targetToken: guardianToken,
@@ -126,27 +127,43 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser == null) throw Exception("User not logged in");
 
+      // Get current user data for notification
+      final currentUserRef =
+          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
+      final currentUserDoc = await currentUserRef.get();
+      final currentUserEmail =
+          currentUserDoc.data()?['email'] ?? currentUser.email ?? 'A protege';
+
+      // Get guardian data for notification
+      final guardianRef =
+          FirebaseFirestore.instance.collection('users').doc(event.uidToRemove);
+      final guardianDoc = await guardianRef.get();
+      final guardianToken = guardianDoc.data()?['token'];
+
       // Use a batch write to update both records atomically
       final batch = FirebaseFirestore.instance.batch();
 
       // Remove guardian from current user's document
-      final currentUserRef =
-          FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
-
       batch.update(currentUserRef, {
         'guardians': FieldValue.arrayRemove([event.uidToRemove])
       });
 
       // Remove current user as protege from guardian's document
-      final guardianRef =
-          FirebaseFirestore.instance.collection('users').doc(event.uidToRemove);
-
       batch.update(guardianRef, {
         'proteges': FieldValue.arrayRemove([currentUser.uid])
       });
 
       // Commit the batch write
       await batch.commit();
+
+      // Send notification to guardian about removal
+      if (guardianToken != null) {
+        await _fcmService.sendNotification(
+          targetToken: guardianToken,
+          title: 'Protege Relationship Ended',
+          body: '$currentUserEmail has removed you as their guardian',
+        );
+      }
 
       add(FetchGuardiansRequested());
     } catch (e) {
@@ -199,10 +216,11 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       // Remove protege from current user's document
       final currentUserRef =
           FirebaseFirestore.instance.collection('users').doc(currentUser.uid);
-      
+
       // Get current user data for notification
       final currentUserDoc = await currentUserRef.get();
-      final currentUserEmail = currentUserDoc.data()?['email'] ?? currentUser.email ?? 'A guardian';
+      final currentUserEmail =
+          currentUserDoc.data()?['email'] ?? currentUser.email ?? 'A guardian';
 
       batch.update(currentUserRef, {
         'proteges': FieldValue.arrayRemove([event.uidToRemove])
@@ -215,11 +233,11 @@ class UserBloc extends Bloc<UserEvent, UserState> {
       batch.update(protegeRef, {
         'guardians': FieldValue.arrayRemove([currentUser.uid])
       });
-      
+
       // Get protege data for notification
       final protegeDoc = await protegeRef.get();
       final protegeToken = protegeDoc.data()?['token'];
-      
+
       // Send notification to protege about removal
       if (protegeToken != null) {
         await _fcmService.sendNotification(

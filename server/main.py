@@ -12,7 +12,6 @@ import queue
 import face_recognition
 from flask import Flask, Response, jsonify, request
 from threading import Lock
-import firebase_admin
 from firebase_admin import credentials, firestore, messaging
 from google.cloud import firestore
 from google.oauth2 import service_account
@@ -63,7 +62,6 @@ def process_frames(input_queue, output_queue, client_id):
         doc = doc_ref.get()
         if doc.exists:
             uid = doc.to_dict().get("uid")
-            # Assuming user's FCM token is stored in collection "users" as "fcm_token"
             user_doc = db.collection("users").document(uid).get()
             fcm_token = user_doc.to_dict().get("token")
         else:
@@ -73,49 +71,95 @@ def process_frames(input_queue, output_queue, client_id):
     except Exception as e:
         print(f"Error retrieving UID/FCM token: {e}")
         fcm_token = None
-    
+
     try:
         while running:
             # Check client status
             with clients_lock:
                 if client_id not in clients or not clients[client_id]['running']:
+                    print(f"Processor stopping: client {client_id} not active")
                     break
 
-            # Get frame with timeout
             try:
                 frame = input_queue.get(timeout=0.5)
+                if frame is None or frame.size == 0:
+                    continue
             except queue.Empty:
                 continue
 
+            # Validate frame properties
+            if frame.dtype != np.uint8:
+                print(f"Invalid frame dtype: {frame.dtype}")
+                continue
+                
+            if frame.ndim not in (2, 3):
+                print(f"Invalid frame dimensions: {frame.ndim}")
+                continue
+
             current_time = time.time()
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            small_rgb_frame = cv2.resize(rgb_frame, (0, 0), fx=0.25, fy=0.25)
+
+            # Robust color conversion
+            try:
+                if frame.ndim == 2:  # Grayscale
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+                elif frame.shape[2] == 4:  # BGRA format
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2RGB)
+                else:  # Assume BGR
+                    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            except Exception as e:
+                print(f"Frame conversion error: {e}")
+                continue
+
+            # Create resized copy for face detection
+            try:
+                small_rgb_frame = cv2.resize(rgb_frame, (0, 0), fx=0.25, fy=0.25)
+                if small_rgb_frame.size == 0:
+                    print("Resized frame is empty")
+                    continue
+            except Exception as e:
+                print(f"Resize error: {e}")
+                continue
 
             # Face detection
-            face_locations_small = face_recognition.face_locations(small_rgb_frame, model="hog")
-            current_face_locations = [(top*4, right*4, bottom*4, left*4) 
-                                    for (top, right, bottom, left) in face_locations_small]
-
+            try:
+                face_locations_small = face_recognition.face_locations(small_rgb_frame, model="hog")
+                current_face_locations = [(top*4, right*4, bottom*4, left*4)
+                                        for (top, right, bottom, left) in face_locations_small]
+            except Exception as e:
+                print(f"Face location error: {e}")
+                current_face_locations = []
+                
             num_faces = len(current_face_locations)
             force_encode = num_faces != prev_num_faces
             prev_num_faces = num_faces
 
             # Face recognition
             if frame_count % 10 == 0 or force_encode:
-                current_face_encodings = face_recognition.face_encodings(
-                    rgb_frame, current_face_locations, model="small"
-                )
+                current_face_encodings = []
+                if current_face_locations:
+                    try:
+                        current_face_encodings = face_recognition.face_encodings(
+                            rgb_frame, current_face_locations, model="small"
+                        )
+                    except Exception as e:
+                        print(f"Encoding error: {e}")
+                        current_face_encodings = []
+
                 current_names = []
                 for encoding in current_face_encodings:
                     if encoding.size == 0:
                         current_names.append("Unknown")
                         continue
-                    dists = np.linalg.norm(known_face_encodings - encoding, axis=1)
-                    matches = dists <= 0.5
-                    if np.any(matches):
-                        first_match_index = np.argmin(dists)
-                        name = known_face_names[first_match_index]
-                    else:
+                    try:
+                        dists = np.linalg.norm(known_face_encodings - encoding, axis=1)
+                        matches = dists <= 0.5
+                        if np.any(matches):
+                            first_match_index = np.argmin(dists)
+                            name = known_face_names[first_match_index]
+                        else:
+                            name = "Unknown"
+                    except Exception as e:
+                        print(f"Recognition error: {e}")
                         name = "Unknown"
                     current_names.append(name)
                 recognized_names = current_names
@@ -130,24 +174,21 @@ def process_frames(input_queue, output_queue, client_id):
                             print(f"Detected: {name}")
                             last_print_times[name] = current_time
 
-                            # Send FCM notification
                             if fcm_token:
                                 detectedData = {"name": name}
-                                send_notification(uid , fcm_token, detectedData, "self")
-                                send_notifications_to_guardians(uid, detectedData )
+                                send_notification(uid, fcm_token, detectedData, "self")
+                                send_notifications_to_guardians(uid, detectedData)
 
                 color = (0, 255, 0) if name.endswith("G") else (0, 0, 255) if name != "Unknown" else (0, 255, 255)
                 cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
-                cv2.putText(frame, name, (left, top-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
             # Add client ID watermark
             cv2.putText(frame, client_id[:8], (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
 
-            # Update output - Always put processed frame
             try:
-                if output_queue.full():
-                    output_queue.get_nowait()
-                output_queue.put(frame)
+                if not output_queue.full():
+                    output_queue.put(frame)
             except:
                 pass  # Queue might be closed
             frame_count += 1
@@ -156,11 +197,11 @@ def process_frames(input_queue, output_queue, client_id):
         print(f"Processor error for {client_id}: {str(e)}")
     finally:
         print(f"Closing processor for {client_id}")
-        # Put sentinel value to signal end
         try:
             output_queue.put(None, block=False)
         except:
             pass
+
 
 def get_access_token():
     auth_req = GoogleRequest()
@@ -178,9 +219,9 @@ def send_notification(uid, fcm_token, detectedData, mod):
     }
 
     if mod == "self":
-        title = detectedData["name"] + " was detected on your device."
+        title = f"{detectedData['name']} was detected on your device."
     elif mod == "guardian":
-        title = detectedData["name"] + " was detected on " + uid + "'s device."
+        title = f"{detectedData['name']} was detected on {uid}'s device."
     else:
         raise ValueError("Invalid mod value. Use 'self' or 'guardian'.")
 
@@ -195,8 +236,12 @@ def send_notification(uid, fcm_token, detectedData, mod):
         }
     }
 
-    response = requests.post(url, headers=headers, data=json.dumps(message_payload))
-    return response.status_code, response.text
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(message_payload))
+        return response.status_code, response.text
+    except Exception as e:
+        print(f"Notification send error: {e}")
+        return 500, str(e)
 
 def send_notifications_to_guardians(uid, detectedData):
     try:
@@ -337,7 +382,7 @@ async def handle_websocket(websocket):
         # Clean up any existing connection with same ID
         cleanup_client(client_id)
         
-        input_queue = queue.Queue(maxsize=5)  # Increased queue size
+        input_queue = queue.Queue(maxsize=5)
         output_queue = queue.Queue(maxsize=5)
 
         processing_thread = threading.Thread(
@@ -369,23 +414,31 @@ async def handle_websocket(websocket):
                     break
                 continue
 
-            np_array = np.frombuffer(message, dtype=np.uint8)
-            frame = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
-            
-            if frame is not None:
+            # Validate frame data
+            if len(message) < 100:  # Minimum valid frame size
+                print(f"Received suspiciously small frame ({len(message)} bytes)")
+                continue
+
+            try:
+                np_array = np.frombuffer(message, dtype=np.uint8)
+                frame = cv2.imdecode(np_array, cv2.IMREAD_COLOR)
+                
+                if frame is None or frame.size == 0:
+                    print(f"Invalid frame from {client_id}")
+                    continue
+                    
                 # Check if client is still active
                 with clients_lock:
                     if client_id not in clients or not clients[client_id]['running']:
                         break
                         
                 try:
-                    if input_queue.full():
-                        input_queue.get_nowait()  # Remove oldest frame
-                    input_queue.put(frame, block=False)
+                    if not input_queue.full():
+                        input_queue.put(frame, block=False)
                 except queue.Full:
                     pass  # Skip frame if queue is full
-            else:
-                print(f"Invalid frame from {client_id}")
+            except Exception as e:
+                print(f"Frame processing error: {str(e)}")
 
     except websockets.exceptions.ConnectionClosed as e:
         print(f"Client {client_id} disconnected: {e.code}")

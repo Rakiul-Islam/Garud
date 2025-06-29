@@ -33,7 +33,7 @@ class AppTheme {
         filled: true,
         fillColor: Colors.grey.shade100,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
@@ -73,7 +73,7 @@ class AppTheme {
         filled: true,
         fillColor: Colors.grey.shade800,
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
