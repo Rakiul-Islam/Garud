@@ -3,7 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:garudclient/blocs/user/user_bloc.dart';
-import 'package:garudclient/blocs/user/profile_bloc.dart';
 import 'package:garudclient/navigation/auth_wrapper.dart';
 import 'package:garudclient/repositories/auth_repository.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -43,17 +42,15 @@ class MyApp extends StatelessWidget {
         BlocProvider<AuthBloc>(create: (_) => AuthBloc(_authRepository)),
         BlocProvider<UserBloc>(create: (_) => UserBloc()),
         BlocProvider<ThemeBloc>(create: (_) => ThemeBloc(prefs)),
-        BlocProvider<ProfileBloc>(create: (_) => ProfileBloc()),
       ],
       child: BlocBuilder<ThemeBloc, ThemeState>(
-        builder: (context, state) {
-          return MaterialApp(
-            title: 'Garud',
-            theme: AppTheme.lightTheme,
-            darkTheme: AppTheme.darkTheme,
-            themeMode: state.isDarkMode ? ThemeMode.dark : ThemeMode.light,
-            home: AuthWrapper(),
-          );
+        builder: (context, state) {        return MaterialApp(
+          title: 'Garud',
+          theme: ThemeConfig.lightTheme,
+          darkTheme: ThemeConfig.darkTheme,
+          themeMode: state.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+          home: AuthWrapper(),
+        );
         },
       ),
     );

@@ -1,18 +1,18 @@
-// screens/home_page.dart
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:garudclient/blocs/theme/theme_bloc.dart';
+import 'package:garudclient/blocs/theme/theme_event.dart';
+import 'package:garudclient/blocs/theme/theme_state.dart';
+import 'package:garudclient/blocs/user/user_bloc.dart';
+import 'package:garudclient/blocs/user/user_event.dart';
+import 'package:garudclient/blocs/user/user_state.dart';
 import 'package:garudclient/screens/add_guardians_page.dart';
 import 'package:garudclient/screens/guardians_page.dart';
 import 'package:garudclient/screens/login_page.dart';
 import 'package:garudclient/screens/profile_page.dart';
 import 'package:garudclient/screens/proteges_page.dart';
 import 'package:garudclient/data/models/user_model.dart';
-import '../blocs/user/user_bloc.dart';
-import '../blocs/user/user_event.dart';
-import '../blocs/theme/theme_bloc.dart';
-import '../blocs/theme/theme_event.dart';
-import '../blocs/theme/theme_state.dart';
 
 class HomePage extends StatefulWidget {
   final UserModel user;
@@ -26,19 +26,18 @@ class _HomePageState extends State<HomePage> {
   String? _garudId;
   bool _isLoading = true;
   int _selectedIndex = 0;
+  late UserModel _currentUser; // Add current user state
+
+  UserModel get currentUser => _currentUser;
 
   @override
   void initState() {
     super.initState();
+    _currentUser = widget.user;
     _garudId = widget.user.garudId;
     _isLoading = false;
-    // Fetch both guardians and proteges when page loads
-    context.read<UserBloc>().add(FetchGuardiansRequested());
-    context.read<UserBloc>().add(FetchProtegesRequested());
-  }
-
-  Future<void> _loadUserData() async {
-    // No longer needed, user data is passed from login page
+    // Load initial data
+    _refreshHomeData();
   }
 
   void _logout(BuildContext context) async {
@@ -56,8 +55,7 @@ class _HomePageState extends State<HomePage> {
       MaterialPageRoute(builder: (_) => const AddGuardianPage()),
     ).then((_) {
       // Refresh data when returning from add guardian page
-      context.read<UserBloc>().add(FetchGuardiansRequested());
-      context.read<UserBloc>().add(FetchProtegesRequested());
+      _refreshHomeData();
     });
   }
 
@@ -130,6 +128,22 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _selectedIndex = index;
     });
+    
+    // Refresh data based on selected tab
+    if (index == 0) { // Home tab - refresh complete user data
+      context.read<UserBloc>().add(UpdateUserRequested());
+    } else if (index == 1) { // Guardians tab
+      context.read<UserBloc>().add(FetchGuardiansRequested());
+    } else if (index == 2) { // Proteges tab
+      context.read<UserBloc>().add(FetchProtegesRequested());
+    } else if (index == 3) { // Profile tab
+      context.read<UserBloc>().add(LoadUserProfile());
+    }
+  }
+
+  void _refreshHomeData() {
+    // Use the comprehensive user update instead of individual requests
+    context.read<UserBloc>().add(UpdateUserRequested());
   }
 
   Widget _buildHomeTab() {
@@ -234,7 +248,23 @@ class _HomePageState extends State<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return BlocListener<UserBloc, UserState>(
+      listener: (context, state) {
+        if (state is UserUpdateSuccess) {
+          setState(() {
+            _currentUser = state.user;
+            _garudId = state.user.garudId;
+          });
+        } else if (state is UserUpdateFailed) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to update user data: ${state.message}'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      },
+      child: Scaffold(
       endDrawer: _buildDrawer(),
       appBar: AppBar(
         title: const Text("Garud"),
@@ -290,6 +320,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
+    ),
     );
   }
 }

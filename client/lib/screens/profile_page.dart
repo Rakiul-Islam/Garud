@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../blocs/auth/auth_bloc.dart';
-import '../blocs/auth/auth_event.dart';
-import '../blocs/user/profile_bloc.dart';
-import '../blocs/user/profile_event.dart';
-import '../blocs/user/profile_state.dart';
+import 'package:garudclient/blocs/auth/auth_bloc.dart';
+import 'package:garudclient/blocs/auth/auth_event.dart';
+import 'package:garudclient/blocs/user/user_bloc.dart';
+import 'package:garudclient/blocs/user/user_event.dart';
+import 'package:garudclient/blocs/user/user_state.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({Key? key}) : super(key: key);
@@ -17,7 +17,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
-    context.read<ProfileBloc>().add(LoadProfile());
+    context.read<UserBloc>().add(LoadUserProfile());
   }
 
   @override
@@ -34,13 +34,13 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ],
       ),
-      body: BlocBuilder<ProfileBloc, ProfileState>(
+      body: BlocBuilder<UserBloc, UserState>(
         builder: (context, state) {
-          if (state is ProfileLoading || state is ProfileInitial) {
+          if (state is UserProfileLoading || state is UserInitial) {
             return const Center(child: CircularProgressIndicator());
           }
           
-          if (state is ProfileError) {
+          if (state is UserProfileError) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -49,7 +49,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () {
-                      context.read<ProfileBloc>().add(LoadProfile());
+                      context.read<UserBloc>().add(LoadUserProfile());
                     },
                     child: const Text('Retry'),
                   ),
@@ -58,7 +58,7 @@ class _ProfilePageState extends State<ProfilePage> {
             );
           }
           
-          if (state is ProfileLoaded) {
+          if (state is UserProfileLoaded) {
             return SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(

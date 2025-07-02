@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:garudclient/blocs/auth/auth_bloc.dart';
+import 'package:garudclient/blocs/auth/auth_event.dart';
+import 'package:garudclient/blocs/auth/auth_state.dart';
+import 'package:garudclient/screens/login_page.dart';
 import 'package:intl_phone_number_input/intl_phone_number_input.dart';
-import '../blocs/auth/auth_bloc.dart';
-import '../blocs/auth/auth_event.dart';
-import '../blocs/auth/auth_state.dart';
-import 'home_page.dart';
-import 'login_page.dart';
 
 class SignupPage extends StatefulWidget {
   @override

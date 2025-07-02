@@ -1,50 +1,77 @@
-// screens/guardians_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import '../blocs/user/user_bloc.dart';
-import '../blocs/user/user_event.dart';
-import '../blocs/user/user_state.dart';
+import 'package:garudclient/blocs/user/user_bloc.dart';
+import 'package:garudclient/blocs/user/user_event.dart';
+import 'package:garudclient/blocs/user/user_state.dart';
+import 'package:garudclient/data/models/public_user_model.dart';
+import 'package:garudclient/screens/public_user_details_page.dart';
 
 class GuardiansPage extends StatefulWidget {
-  const GuardiansPage({super.key});
+  final bool refresh;
+  const GuardiansPage({super.key, this.refresh = false});
 
   @override
   State<GuardiansPage> createState() => _GuardiansPageState();
 }
 
-class _GuardiansPageState extends State<GuardiansPage> {
+class _GuardiansPageState extends State<GuardiansPage> with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void initState() {
     super.initState();
     // Fetch guardians when page loads
+    if (widget.refresh) {
+      _refreshData();
+    }
+  }
+
+  void _refreshData() {
     context.read<UserBloc>().add(FetchGuardiansRequested());
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
     return Scaffold(
       body: Column(
         children: [
           // Header section
-          Container(
-            padding: const EdgeInsets.all(16.0),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.shield,
-                  size: 30,
-                  color: Colors.blue,
+          BlocBuilder<UserBloc, UserState>(
+            buildWhen: (previous, current) {
+              return current is GuardiansLoaded ||
+                  current is GuardiansLoadInProgress ||
+                  current is GuardianLoadFailed;
+            },
+            builder: (context, state) {
+              int totalCount = 0;
+              
+              if (state is GuardiansLoaded) {
+                totalCount = state.guardians.length;
+              }
+              
+              return Container(
+                padding: const EdgeInsets.all(16.0),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.shield,
+                      size: 30,
+                      color: Colors.blue,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'My Guardians${totalCount > 0 ? ' ($totalCount)' : ''}',
+                      style: const TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
-                SizedBox(width: 10),
-                Text(
-                  'My Guardians',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
           // Guardians list
           Expanded(
@@ -104,7 +131,7 @@ class _GuardiansPageState extends State<GuardiansPage> {
                   }
                   return RefreshIndicator(
                     onRefresh: () async {
-                      context.read<UserBloc>().add(FetchGuardiansRequested());
+                      _refreshData();
                     },
                     child: ListView.builder(
                       physics: const AlwaysScrollableScrollPhysics(),
@@ -115,18 +142,78 @@ class _GuardiansPageState extends State<GuardiansPage> {
                         return Card(
                           margin: const EdgeInsets.only(bottom: 8.0),
                           child: ListTile(
-                            leading: const CircleAvatar(
-                              backgroundColor: Colors.blue,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => PublicUserDetailsPage(
+                                    uid: guardian.uid,
+                                    status: guardian.status,
+                                    isGuardian: true,
+                                  ),
+                                ),
+                              );
+                            },
+                            leading: CircleAvatar(
+                              backgroundColor: guardian.status == 'accepted'
+                                  ? Colors.green
+                                  : guardian.status == 'pending'
+                                      ? Colors.orange
+                                      : Colors.grey,
                               child: Icon(
-                                Icons.shield,
+                                guardian.status == 'accepted'
+                                    ? Icons.shield
+                                    : guardian.status == 'pending'
+                                        ? Icons.schedule
+                                        : Icons.shield_outlined,
                                 color: Colors.white,
                               ),
                             ),
                             title: Text(
-                              guardian['email'] ?? '',
+                              guardian.name,
                               style: const TextStyle(fontWeight: FontWeight.w500),
                             ),
-                            subtitle: const Text('Guardian'),
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(guardian.email),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    Icon(
+                                      guardian.status == 'accepted' 
+                                          ? Icons.check_circle 
+                                          : guardian.status == 'requested'
+                                              ? Icons.access_time
+                                              : Icons.cancel,
+                                      size: 16,
+                                      color: guardian.status == 'accepted'
+                                          ? Colors.green
+                                          : guardian.status == 'requested'
+                                              ? Colors.orange
+                                              : Colors.red,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      guardian.status == 'accepted' 
+                                          ? 'Request Accepted'
+                                          : guardian.status == 'requested'
+                                              ? 'Request Pending'
+                                              : 'Request ${guardian.status.toUpperCase()}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: guardian.status == 'accepted'
+                                            ? Colors.green
+                                            : guardian.status == 'requested'
+                                                ? Colors.orange
+                                                : Colors.red,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                             trailing: PopupMenuButton<String>(
                               onSelected: (value) {
                                 if (value == 'delete') {
@@ -226,14 +313,14 @@ class _GuardiansPageState extends State<GuardiansPage> {
     );
   }
 
-  void _showDeleteConfirmationDialog(BuildContext context, Map<String, String> guardian) {
+  void _showDeleteConfirmationDialog(BuildContext context, PublicUserModel guardian) {
     showDialog(
       context: context,
       builder: (BuildContext dialogContext) {
         return AlertDialog(
           title: const Text('Remove Guardian'),
           content: Text(
-            'Are you sure you want to remove ${guardian['email']} as your guardian? This will also remove you from their proteges list.',
+            'Are you sure you want to remove ${guardian.email} as your guardian? This will also remove you from their proteges list.',
           ),
           actions: [
             TextButton(
@@ -249,7 +336,7 @@ class _GuardiansPageState extends State<GuardiansPage> {
               ),
               onPressed: () {
                 context.read<UserBloc>().add(
-                      DeleteGuardianRequested(guardian['uid']!),
+                      DeleteGuardianRequested(guardian.uid),
                     );
                 Navigator.of(dialogContext).pop();
 

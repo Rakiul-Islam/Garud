@@ -1,5 +1,29 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+class GuardianProtege {
+  final String status;
+  final String uid;
+
+  GuardianProtege({
+    required this.status,
+    required this.uid,
+  });
+
+  factory GuardianProtege.fromMap(Map<String, dynamic> map) {
+    return GuardianProtege(
+      status: map['status'] ?? '',
+      uid: map['uid'] ?? '',
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'status': status,
+      'uid': uid,
+    };
+  }
+}
+
 class UserModel {
   final String uid;
   final String name;
@@ -10,8 +34,8 @@ class UserModel {
   final DateTime createdAt;
   final DateTime lastLogin;
   final String status;
-  final List<String> guardians;
-  final List<String> proteges;
+  final List<GuardianProtege> guardians;
+  final List<GuardianProtege> proteges;
   final String? token;
 
   UserModel({
@@ -43,8 +67,12 @@ class UserModel {
       createdAt: (data?['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       lastLogin: (data?['lastLogin'] as Timestamp?)?.toDate() ?? DateTime.now(),
       status: data?['status'] ?? 'inactive',
-      guardians: List<String>.from(data?['guardians'] ?? []),
-      proteges: List<String>.from(data?['proteges'] ?? []),
+      guardians: (data?['guardians'] as List<dynamic>?)
+              ?.map((item) => GuardianProtege.fromMap(item as Map<String, dynamic>))
+              .toList() ?? [],
+      proteges: (data?['proteges'] as List<dynamic>?)
+              ?.map((item) => GuardianProtege.fromMap(item as Map<String, dynamic>))
+              .toList() ?? [],
       token: data?['token'],
     );
   }
@@ -60,8 +88,8 @@ class UserModel {
       'createdAt': createdAt,
       'lastLogin': lastLogin,
       'status': status,
-      'guardians': guardians,
-      'proteges': proteges,
+      'guardians': guardians.map((g) => g.toMap()).toList(),
+      'proteges': proteges.map((p) => p.toMap()).toList(),
       'token': token,
     };
   }
@@ -77,8 +105,8 @@ class UserModel {
     DateTime? createdAt,
     DateTime? lastLogin,
     String? status,
-    List<String>? guardians,
-    List<String>? proteges,
+    List<GuardianProtege>? guardians,
+    List<GuardianProtege>? proteges,
     String? token,
   }) {
     return UserModel(

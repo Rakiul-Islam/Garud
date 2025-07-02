@@ -6,7 +6,7 @@ import numpy as np
 # SERVER_URI = "ws://127.0.0.1:8888"  # Replace <server_ip> with your actual server IP
 
 # server_ip = "127.0.0.1"  # For local docker container testing
-SERVER_URI = "ws://192.168.0.105:8888"  # Replace <server_ip> with your actual server IP
+SERVER_URI = "ws://192.168.218.131:8888"  # Replace <server_ip> with your actual server IP
 CLIENT_ID = "garud001"
 
 async def send_frames():
