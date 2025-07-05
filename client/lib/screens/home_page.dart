@@ -10,13 +10,15 @@ import 'package:garudclient/blocs/user/user_state.dart';
 import 'package:garudclient/screens/add_guardians_page.dart';
 import 'package:garudclient/screens/guardians_page.dart';
 import 'package:garudclient/screens/login_page.dart';
+import 'package:garudclient/screens/notifications_page.dart';
 import 'package:garudclient/screens/profile_page.dart';
 import 'package:garudclient/screens/proteges_page.dart';
 import 'package:garudclient/data/models/user_model.dart';
 
 class HomePage extends StatefulWidget {
   final UserModel user;
-  const HomePage({super.key, required this.user});
+  final int selectedIndex;
+  const HomePage({super.key, required this.user, this.selectedIndex = 0});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -26,7 +28,7 @@ class _HomePageState extends State<HomePage> {
   String? _garudId;
   bool _isLoading = true;
   int _selectedIndex = 0;
-  late UserModel _currentUser; // Add current user state
+  late UserModel _currentUser; 
 
   UserModel get currentUser => _currentUser;
 
@@ -34,6 +36,7 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _currentUser = widget.user;
+    _selectedIndex = widget.selectedIndex; 
     _garudId = widget.user.garudId;
     _isLoading = false;
     // Load initial data
@@ -278,6 +281,13 @@ class _HomePageState extends State<HomePage> {
               );
             },
           ),
+          IconButton(
+                icon: const Icon(Icons.notifications),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const NotificationsPage()),
+                ),
+              ),
           Builder(
             builder: (context) => IconButton(
               icon: const Icon(Icons.menu),

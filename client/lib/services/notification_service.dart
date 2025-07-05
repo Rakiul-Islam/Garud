@@ -1,21 +1,29 @@
 import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:garudclient/screens/guardians_page.dart';
+import 'package:garudclient/screens/notifications_page.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:garudclient/blocs/auth/auth_bloc.dart';
+import 'package:garudclient/blocs/auth/auth_state.dart';
+import 'package:garudclient/screens/home_page.dart';
 
 class NotificationService {
-  static final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin =
-      FlutterLocalNotificationsPlugin();
-  
+  static final FlutterLocalNotificationsPlugin
+      _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+
   static final AndroidNotificationChannel channel = AndroidNotificationChannel(
     'high_importance_channel', // id
     'High Importance Notifications', // title
-    description: 'This channel is used for important notifications.', // description
+    description:
+        'This channel is used for important notifications.', // description
     importance: Importance.high,
     playSound: true,
   );
 
-  static Future<void> initialize() async {
+  static Future<void> initialize(BuildContext context) async {
     if (kIsWeb) return;
 
     // Request notification permissions
@@ -28,27 +36,29 @@ class NotificationService {
     // Initialize local notifications
     const AndroidInitializationSettings initializationSettingsAndroid =
         AndroidInitializationSettings('@mipmap/ic_launcher');
-        
+
     final DarwinInitializationSettings initializationSettingsIOS =
         DarwinInitializationSettings(
       requestSoundPermission: true,
       requestBadgePermission: true,
       requestAlertPermission: true,
     );
-    
-    final InitializationSettings initializationSettings = InitializationSettings(
+
+    final InitializationSettings initializationSettings =
+        InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsIOS,
     );
-    
+
     await _flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
       onDidReceiveNotificationResponse: (NotificationResponse details) async {
         print('Notification tapped: ${details.payload}');
+        // Optional: Handle notification tap here too if needed
       },
     );
 
-    // Create notification channel
+    // Create notification channel for Android
     if (!kIsWeb && Platform.isAndroid) {
       await _flutterLocalNotificationsPlugin
           .resolvePlatformSpecificImplementation<
@@ -56,21 +66,26 @@ class NotificationService {
           ?.createNotificationChannel(channel);
     }
 
-    // Set up foreground notification presentation options
-    await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    // Show notifications when in foreground
+    await FirebaseMessaging.instance
+        .setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
       sound: true,
     );
 
-    // Set up message handlers
+    // Foreground message listener
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-    FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageOpenedApp);
 
-    // Check for initial message
+    // Handle tap when app is in background or resumed
+    FirebaseMessaging.onMessageOpenedApp.listen(
+      (message) => _handleMessageOpenedApp(message, context),
+    );
+
+    // Handle tap when app was killed
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
     if (initialMessage != null) {
-      _handleMessageOpenedApp(initialMessage);
+      _handleMessageOpenedApp(initialMessage, context);
     }
   }
 
@@ -90,7 +105,7 @@ class NotificationService {
   @pragma('vm:entry-point')
   static Future<void> handleBackgroundMessage(RemoteMessage message) async {
     print("Handling a background message: ${message.messageId}");
-    
+
     if (message.notification != null) {
       await showNotification(
         message.notification?.title,
@@ -100,9 +115,56 @@ class NotificationService {
     }
   }
 
-  static void _handleMessageOpenedApp(RemoteMessage message) {
+  static void _handleMessageOpenedApp(
+      RemoteMessage message, BuildContext context) {
     print("Message opened app: ${message.data}");
-    // Handle notification tap when app is in background/terminated
+
+    // Get the message_type from the data
+    final messageType = message.data['type'];
+
+    if (messageType != null) {
+      switch (messageType) {
+        case 'guardian_related':
+          // Navigate to threat screen or handle accordingly
+          print("Handle guardian flow");
+          final authState = BlocProvider.of<AuthBloc>(context).state;
+          if (authState is AuthSuccess) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => HomePage(user: authState.user, selectedIndex: 1,)),
+            );
+          }
+          break;
+        case 'protege_related':
+          // Navigate to threat screen or handle accordingly
+          print("Handle protege flow");
+          final authState = BlocProvider.of<AuthBloc>(context).state;
+          if (authState is AuthSuccess) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => HomePage(user: authState.user, selectedIndex: 2,)),
+            );
+          }
+          break;
+        case 'threat_related':
+          // Navigate to guardian request screen or handle accordingly
+          print("Handle threat flow");
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => NotificationsPage()),
+          );
+          break;
+        default:
+          print("Unknown message type: $messageType");
+          final authState = BlocProvider.of<AuthBloc>(context).state;
+          if (authState is AuthSuccess) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => HomePage(user: authState.user)),
+            );
+          }
+      }
+    }
   }
 
   static Future<void> showNotification(

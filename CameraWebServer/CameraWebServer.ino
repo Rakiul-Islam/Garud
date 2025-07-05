@@ -8,13 +8,12 @@
 const char* ssid = WIFI_SSID; // your wifi name from the config header file
 const char* password = WIFI_PASSWORD; // password of your wifi from the config header file
 
-const char* garudID = "garud002"; // garudID for rakiulmalda96@gmail.com
-
+const char* garudID = "garud002"; // garudID
 // TODO: Implement loading WiFi data from a file on the SD card
 
 // WebSocket server details
-const char* websocket_server_host = "192.168.172.131"; // ip of the running python backend server
-const int websocket_server_port = 8888;
+// String websocket_url = "ws://ws.rakiulislam.tech/ws";
+String websocket_url = "ws://192.168.218.131:8888/ws";
 
 // Camera configuration
 #define CAMERA_MODEL_AI_THINKER
@@ -101,7 +100,6 @@ void setup() {
 
 
 void connectToWebSocket() {
-  String websocket_url = "ws://" + String(websocket_server_host) + ":" + String(websocket_server_port) + "/ws";
   Serial.print("Connecting to WebSocket server: ");
   Serial.println(websocket_url);
   

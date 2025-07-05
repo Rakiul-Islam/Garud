@@ -21,6 +21,7 @@ class FCMService {
     required String targetToken,
     required String title,
     required String body,
+    required Map<String, dynamic> data,
   }) async {
     final accessToken = await _getAccessToken();
     final url =
@@ -30,6 +31,7 @@ class FCMService {
       'message': {
         'token': targetToken,
         'notification': {'title': title, 'body': body},
+        'data': data,
       }
     };
 

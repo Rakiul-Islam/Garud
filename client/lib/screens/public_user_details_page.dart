@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:garudclient/data/models/public_user_model.dart';
 import 'package:garudclient/repositories/user_repository.dart';
+import 'package:garudclient/screens/video_feed_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class PublicUserDetailsPage extends StatefulWidget {
@@ -21,16 +22,16 @@ class PublicUserDetailsPage extends StatefulWidget {
 }
 
 class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
-  late Future<PublicUserModel> _guardianDetailsFuture;
+  late Future<PublicUserModel> _publicUserDetailsFuture;
   final UserRepository _userRepository = UserRepository();
 
   @override
   void initState() {
     super.initState();
-    _guardianDetailsFuture = _fetchGuardianDetails();
+    _publicUserDetailsFuture = _fetchPublicUserDetails();
   }
 
-  Future<PublicUserModel> _fetchGuardianDetails() async {
+  Future<PublicUserModel> _fetchPublicUserDetails() async {
     final userModel = await _userRepository.getPublicUserData(widget.uid);
     return PublicUserModel(
       uid: userModel.uid,
@@ -81,7 +82,7 @@ class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
         title: Text(widget.isGuardian ? 'Guardian Details' : 'Protege Details'),
       ),
       body: FutureBuilder<PublicUserModel>(
-        future: _guardianDetailsFuture,
+        future: _publicUserDetailsFuture,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(
@@ -112,7 +113,7 @@ class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
               ),
             );
           } else if (snapshot.hasData) {
-            final guardian = snapshot.data!;
+            final user = snapshot.data!;
             return SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
               child: Column(
@@ -155,8 +156,8 @@ class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
                               .onPrimary
                               .withOpacity(0.2),
                           child: Text(
-                            guardian.name.isNotEmpty
-                                ? guardian.name[0].toUpperCase()
+                            user.name.isNotEmpty
+                                ? user.name[0].toUpperCase()
                                 : 'G',
                             style: TextStyle(
                               fontSize: 32,
@@ -167,7 +168,7 @@ class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          guardian.name,
+                          user.name,
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -190,7 +191,7 @@ class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
-                              guardian.status,
+                              user.status,
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w500,
@@ -207,18 +208,18 @@ class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
                   _buildDetailCard(
                     icon: Icons.email_outlined,
                     label: 'Email',
-                    value: guardian.email,
-                    actionIcon: Icons.copy_outlined,
-                    onAction: () => _copyToClipboard(guardian.email, 'Email'),
+                    value: user.email,
+                    actionIcon: Icons.file_copy,
+                    onAction: () => _copyToClipboard(user.email, 'Email'),
                     actionTooltip: 'Copy Email',
                   ),
                   const SizedBox(height: 22),
                   _buildDetailCard(
                     icon: Icons.phone_outlined,
                     label: 'Phone Number',
-                    value: guardian.phoneNumber,
+                    value: user.phoneNumber,
                     actionIcon: Icons.phone,
-                    onAction: () => _makePhoneCall(guardian.phoneNumber),
+                    onAction: () => _makePhoneCall(user.phoneNumber),
                     actionTooltip: 'Call',
                   ),
 
@@ -226,13 +227,18 @@ class _PublicUserDetailsPageState extends State<PublicUserDetailsPage> {
 
                   if (!widget.isGuardian)
                     _buildDetailCard(
-                      icon: Icons.visibility,
+                      icon: Icons.visibility_outlined,
                       label: 'Garud ID',
-                      value: guardian.garudId,
-                      actionIcon: Icons.copy_outlined,
-                      onAction: () =>
-                          _copyToClipboard(guardian.garudId, 'Garud ID'),
-                      actionTooltip: 'Copy Garud ID',
+                      value: user.garudId,
+                      actionIcon: Icons.videocam,
+                      onAction: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              VideoFeedPage(garudId: user.garudId),
+                        ),
+                      ),
+                      actionTooltip: 'Open video feed',
                     ),
                 ],
               ),

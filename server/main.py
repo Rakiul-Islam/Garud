@@ -19,7 +19,7 @@ from google.auth.transport.requests import Request as GoogleRequest
 
 # Configuration
 ENCODINGS_FILE = "face_encodings.pkl"
-PRINT_COOLDOWN = 15 * 60  # 15 minutes in seconds
+PRINT_COOLDOWN = 5 * 60  # 5 minutes in seconds
 PROJECT_ID = "garud-21e17"
 
 # Initialize Firebase only once
@@ -61,13 +61,16 @@ def process_frames(input_queue, output_queue, client_id):
         doc_ref = db.collection("garudIdMap").document(client_id)
         doc = doc_ref.get()
         if doc.exists:
-            uid = doc.to_dict().get("uid")
-            user_doc = db.collection("users").document(uid).get()
-            fcm_token = user_doc.to_dict().get("token")
+            client_uid = doc.to_dict().get("uid")
+            user_doc = db.collection("users").document(client_uid).get()
+            user_doc = user_doc.to_dict()
+            fcm_token = user_doc.get("token")
+            client_name = user_doc.get("name")
+            client_gairdians = user_doc.get("guardians", [])
         else:
             print(f"No UID mapping found for client_id {client_id}")
             fcm_token = None
-        print(f"UID: {uid}, FCM Token: {fcm_token}")
+        print(f"UID: {client_uid}, FCM Token: {fcm_token}")
     except Exception as e:
         print(f"Error retrieving UID/FCM token: {e}")
         fcm_token = None
@@ -175,10 +178,8 @@ def process_frames(input_queue, output_queue, client_id):
                             last_print_times[name] = current_time
 
                             if fcm_token:
-                                detectedData = {"name": name}
-                                send_notification(uid, fcm_token, detectedData, "self")
-                                send_notifications_to_guardians(uid, detectedData)
-
+                                handle_known_face_detection(name, fcm_token, client_uid, client_id, client_name, client_gairdians)  
+                                
                 color = (0, 255, 0) if name.endswith("G") else (0, 0, 255) if name != "Unknown" else (0, 255, 255)
                 cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
                 cv2.putText(frame, name, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
@@ -202,6 +203,91 @@ def process_frames(input_queue, output_queue, client_id):
         except:
             pass
 
+def handle_known_face_detection(criminal_name: str, fcm_token: str, client_uid: str, client_id: str, client_name: str, client_gaurdians: list):
+    try:
+        print(f"[INFO] Starting handle_known_face_detection for {criminal_name} on device {client_id}")
+
+        # Get criminal data
+        print(f"[INFO] Fetching criminal document: {criminal_name}")
+        criminal_doc = db.collection("criminals").document(criminal_name).get()
+        if not criminal_doc.exists:
+            print(f"[WARN] Criminal document not found: {criminal_name}")
+            return
+
+        criminal_data = criminal_doc.to_dict()
+        full_name = criminal_data.get("full_name", criminal_name)
+        threat_level = criminal_data.get("threat_level", "Unknown")
+        print(f"[INFO] Retrieved criminal data: full_name={full_name}, threat_level={threat_level}")
+
+        # Prepare detected data
+        detectedData = {
+            "criminal_id": criminal_name,
+            "criminal_name": full_name,
+            "threat_level": threat_level,
+            "timestamp": time.time(),
+            "location": {
+                "latitude": 0.0,  # Optional: update with actual coordinates
+                "longitude": 0.0
+            }
+        }
+        print(f"[INFO] Constructed detectedData: {detectedData}")
+
+        # Send notification to user
+        if fcm_token:
+            print(f"[INFO] Sending notification to user {client_uid}")
+            response_code, response_text = send_notification(fcm_token, client_name, detectedData, "self")
+            if response_code == 200:
+                print(f"[INFO] Notification sent successfully to user {client_uid}: {response_text}")
+            else:
+                print(f"[ERROR] Failed to send notification to user {client_uid}: {response_text}")
+        else:
+            print(f"[INFO] No FCM token for user {client_uid}, skipping notification")
+
+        # Store detection for user
+        print(f"[INFO] Storing detection for user {client_uid}")
+        db.collection("users").document(client_uid).collection("notifications").add({
+            **detectedData,
+            "detected_on_self": True,
+            "read": False
+        })
+        print(f"[INFO] Detection stored for user {client_uid}")
+
+        # Notify and store for guardians
+        print(f"[INFO] Notifying guardians of user {client_uid}")
+        for guardian in client_gaurdians:
+            guardian_uid = guardian.get("uid")
+            if not guardian_uid:
+                print(f"[WARN] Guardian entry missing 'uid', skipping: {guardian}")
+                continue
+
+            print(f"[INFO] Fetching guardian document: {guardian_uid}")
+            guardian_doc = db.collection("users").document(guardian_uid).get()
+            if guardian_doc.exists:
+                guardian_data = guardian_doc.to_dict()
+                guardian_token = guardian_data.get("token")
+                if guardian_token:
+                    print(f"[INFO] Sending notification to guardian {guardian_uid}")
+                    send_notification(guardian_token, client_name, detectedData, "guardian")
+                else:
+                    print(f"[WARN] No FCM token for guardian {guardian_uid}, skipping notification")
+
+                print(f"[INFO] Storing detection for guardian {guardian_uid}")
+                db.collection("users").document(guardian_uid).collection("notifications").add({
+                    **detectedData,
+                    "detected_on_self": False,
+                    "detected_on_protege_s_uid": client_uid,
+                    "detected_on_protege_s_name": client_name,
+                    "read": False
+                })
+                print(f"[INFO] Detection stored for guardian {guardian_uid}")
+            else:
+                print(f"[WARN] Guardian document not found: {guardian_uid}")
+
+        print(f"[INFO] Finished handle_known_face_detection for {criminal_name} on device {client_id}")
+
+    except Exception as e:
+        print(f"[ERROR] handle_known_face_detection for {client_id}: {e}")
+
 
 def get_access_token():
     auth_req = GoogleRequest()
@@ -209,7 +295,7 @@ def get_access_token():
     return credentials.token
 
 # Send FCM push notification
-def send_notification(uid, fcm_token, detectedData, mod):
+def send_notification(fcm_token, client_name, detectedData, mode):
     # mod = "self" or "guardian"
     # detectedData is a dictionary containing the name and extra info about the detected person 
     url = f"https://fcm.googleapis.com/v1/projects/{PROJECT_ID}/messages:send"
@@ -218,10 +304,10 @@ def send_notification(uid, fcm_token, detectedData, mod):
         "Content-Type": "application/json; UTF-8",
     }
 
-    if mod == "self":
-        title = f"{detectedData['name']} was detected on your device."
-    elif mod == "guardian":
-        title = f"{detectedData['name']} was detected on {uid}'s device."
+    if mode == "self":
+        title = f"{detectedData['criminal_name']} was detected on your device."
+    elif mode == "guardian":
+        title = f"{detectedData['criminal_name']} was detected on {client_name}'s device."
     else:
         raise ValueError("Invalid mod value. Use 'self' or 'guardian'.")
 
@@ -230,46 +316,21 @@ def send_notification(uid, fcm_token, detectedData, mod):
             "token": fcm_token,
             "notification": {
                 "title": title,
-                "body": "",
+                "body": "Threat level: " + detectedData["threat_level"],
             },
-            "data": detectedData or {}
+            "data": {
+                "type": "threat_related",
+            }
         }
     }
 
     try:
         response = requests.post(url, headers=headers, data=json.dumps(message_payload))
+        print(f"Notification sent to {fcm_token} with response code {response.text}")
         return response.status_code, response.text
     except Exception as e:
         print(f"Notification send error: {e}")
         return 500, str(e)
-
-def send_notifications_to_guardians(uid, detectedData):
-    try:
-        user_doc = db.collection("users").document(uid).get()
-        if not user_doc.exists:
-            print(f"User {uid} not found.")
-            return
-
-        user_data = user_doc.to_dict()
-        guardian_ids = user_data.get("guardians", [])
-
-        print(f"Guardians for {uid}: {guardian_ids}")
-
-        for guardian_id in guardian_ids:
-            guardian_doc = db.collection("users").document(guardian_id).get()
-            if guardian_doc.exists:
-                guardian_data = guardian_doc.to_dict()
-                fcm_token = guardian_data.get("token")
-                if fcm_token:
-                    status_code, response_text = send_notification(uid, fcm_token, detectedData, "guardian")
-                    print(f"Sent notification to guardian: {guardian_id} | Status: {status_code}")
-                else:
-                    print(f"No FCM token found for guardian: {guardian_id}")
-            else:
-                print(f"Guardian document not found: {guardian_id}")
-
-    except Exception as e:
-        print(f"Error sending notification to guardians of {uid}: {e}")
 
 def generate_video(client_id):
     print(f"Starting video feed for {client_id}")
@@ -325,6 +386,10 @@ def generate_video(client_id):
             break
     
     print(f"Video feed ended for {client_id}")
+
+@app.route('/')
+def index():
+    return "Hello from Garud"
 
 @app.route('/video_feed/<client_id>')
 def video_feed(client_id):
@@ -449,7 +514,7 @@ async def handle_websocket(websocket):
             cleanup_client(client_id)
 
 async def main():
-    local_ip = socket.gethostbyname(socket.gethostname())
+    local_ip = "0.0.0.0"  # Run on localhost
     server = await websockets.serve(handle_websocket, local_ip, 8888)
     print(f"WebSocket server started on ws://{local_ip}:8888")
     await server.wait_closed()

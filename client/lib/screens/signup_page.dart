@@ -148,8 +148,11 @@ class _SignupPageState extends State<SignupPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: colorScheme.background,
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is SignupSuccess) {
@@ -160,7 +163,7 @@ class _SignupPageState extends State<SignupPage> {
             );
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Signup successful! Please log in.', style: TextStyle(color: Colors.white)),
+                content: Text('Signup successful! Please log in.', style: TextStyle(color: colorScheme.onPrimary)),
                 backgroundColor: Colors.green[600],
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
@@ -171,7 +174,7 @@ class _SignupPageState extends State<SignupPage> {
           } else if (state is AuthFailure) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Signup failed: ${state.message}', style: TextStyle(color: Colors.white)),
+                content: Text('Signup failed: ${state.message}', style: TextStyle(color: colorScheme.onPrimary)),
                 backgroundColor: Colors.red[600],
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
@@ -201,14 +204,14 @@ class _SignupPageState extends State<SignupPage> {
                             width: 80,
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
-                                colors: [Colors.blue[600]!, Colors.blue[800]!],
+                                colors: [colorScheme.primary, colorScheme.primaryContainer],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
                               borderRadius: BorderRadius.circular(20),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.blue.withOpacity(0.3),
+                                  color: colorScheme.primary.withOpacity(0.3),
                                   blurRadius: 15,
                                   offset: Offset(0, 5),
                                 ),
@@ -217,7 +220,7 @@ class _SignupPageState extends State<SignupPage> {
                             child: Icon(
                               Icons.person_add,
                               size: 40,
-                              color: Colors.white,
+                              color: colorScheme.onPrimary,
                             ),
                           ),
                           SizedBox(height: 20),
@@ -226,7 +229,7 @@ class _SignupPageState extends State<SignupPage> {
                             style: TextStyle(
                               fontSize: 28,
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey[800],
+                              color: colorScheme.onBackground,
                               letterSpacing: 0.5,
                             ),
                           ),
@@ -235,7 +238,7 @@ class _SignupPageState extends State<SignupPage> {
                             'Sign up for Garud',
                             style: TextStyle(
                               fontSize: 16,
-                              color: Colors.grey[600],
+                              color: colorScheme.onSurfaceVariant,
                               letterSpacing: 0.2,
                             ),
                           ),
@@ -249,7 +252,7 @@ class _SignupPageState extends State<SignupPage> {
                     Container(
                       padding: EdgeInsets.all(28),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: colorScheme.surface,
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
@@ -265,25 +268,25 @@ class _SignupPageState extends State<SignupPage> {
                           TextFormField(
                             controller: _emailController,
                             keyboardType: TextInputType.emailAddress,
-                            style: TextStyle(color: Colors.grey[800]),
+                            style: TextStyle(color: colorScheme.onSurface),
                             decoration: InputDecoration(
                               labelText: 'Email Address',
-                              prefixIcon: Icon(Icons.email_outlined, color: Colors.blue[600]),
-                              labelStyle: TextStyle(color: Colors.grey[600]),
+                              prefixIcon: Icon(Icons.email_outlined, color: colorScheme.primary),
+                              labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.blue[600]!, width: 2),
+                                borderSide: BorderSide(color: colorScheme.primary, width: 2),
                               ),
                               filled: true,
-                              fillColor: Colors.grey[50],
+                              fillColor: colorScheme.surfaceVariant.withOpacity(0.3),
                               contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                             ),
                           ),
@@ -294,17 +297,17 @@ class _SignupPageState extends State<SignupPage> {
                           TextFormField(
                             controller: _passwordController,
                             obscureText: _obscurePassword,
-                            style: TextStyle(color: Colors.grey[800]),
+                            style: TextStyle(color: colorScheme.onSurface),
                             decoration: InputDecoration(
                               labelText: 'Password',
-                              prefixIcon: Icon(Icons.lock_outline, color: Colors.blue[600]),
+                              prefixIcon: Icon(Icons.lock_outline, color: colorScheme.primary),
                               suffixIcon: IconButton(
                                 icon: Icon(
                                   size: 18,
                                   _obscurePassword
                                       ? Icons.visibility_off
                                       : Icons.visibility,
-                                  color: Colors.grey[500],
+                                  color: colorScheme.onSurfaceVariant,
                                 ),
                                 onPressed: () {
                                   setState(() {
@@ -312,21 +315,21 @@ class _SignupPageState extends State<SignupPage> {
                                   });
                                 },
                               ),
-                              labelStyle: TextStyle(color: Colors.grey[600]),
+                              labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.blue[600]!, width: 2),
+                                borderSide: BorderSide(color: colorScheme.primary, width: 2),
                               ),
                               filled: true,
-                              fillColor: Colors.grey[50],
+                              fillColor: colorScheme.surfaceVariant.withOpacity(0.3),
                               contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                             ),
                           ),
@@ -337,25 +340,25 @@ class _SignupPageState extends State<SignupPage> {
                           TextFormField(
                             controller: _nameController,
                             textCapitalization: TextCapitalization.words,
-                            style: TextStyle(color: Colors.grey[800]),
+                            style: TextStyle(color: colorScheme.onSurface),
                             decoration: InputDecoration(
                               labelText: 'Full Name',
-                              prefixIcon: Icon(Icons.person_outline, color: Colors.blue[600]),
-                              labelStyle: TextStyle(color: Colors.grey[600]),
+                              prefixIcon: Icon(Icons.person_outline, color: colorScheme.primary),
+                              labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.blue[600]!, width: 2),
+                                borderSide: BorderSide(color: colorScheme.primary, width: 2),
                               ),
                               filled: true,
-                              fillColor: Colors.grey[50],
+                              fillColor: colorScheme.surfaceVariant.withOpacity(0.3),
                               contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                             ),
                           ),
@@ -367,18 +370,18 @@ class _SignupPageState extends State<SignupPage> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Container(
-                                decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: _phoneError != null 
-                                      ? Colors.red[400]! 
-                                      : _phoneFocusNode.hasFocus
-                                        ? Colors.blue[600]!
-                                        : Colors.grey[300]!,
-                                    width: _phoneError != null || _phoneFocusNode.hasFocus ? 2 : 1,
-                                  ),
-                                  borderRadius: BorderRadius.circular(12),
-                                  color: Colors.grey[50],
-                                ),
+                                // decoration: BoxDecoration(
+                                //   border: Border.all(
+                                //     color: _phoneError != null 
+                                //       ? colorScheme.error
+                                //       : _phoneFocusNode.hasFocus
+                                //         ? colorScheme.primary
+                                //         : colorScheme.outline,
+                                //     width: _phoneError != null || _phoneFocusNode.hasFocus ? 2 : 1,
+                                //   ),
+                                //   borderRadius: BorderRadius.circular(12),
+                                //   color: colorScheme.surfaceVariant.withOpacity(0.3),
+                                // ),
                                 child: InternationalPhoneNumberInput(
                                   onInputChanged: (PhoneNumber number) {
                                     setState(() {
@@ -401,8 +404,8 @@ class _SignupPageState extends State<SignupPage> {
                                     labelText: 'Phone Number',
                                     labelStyle: TextStyle(
                                       color: _phoneError != null 
-                                        ? Colors.red[400] 
-                                        : Colors.grey[600],
+                                        ? colorScheme.error
+                                        : colorScheme.onSurfaceVariant,
                                     ),
                                     border: InputBorder.none,
                                     contentPadding: EdgeInsets.symmetric(
@@ -413,11 +416,11 @@ class _SignupPageState extends State<SignupPage> {
                                     fillColor: Colors.transparent,
                                   ),
                                   textStyle: TextStyle(
-                                    color: Colors.grey[800],
+                                    color: colorScheme.onSurface,
                                     fontSize: 16,
                                   ),
                                   selectorTextStyle: TextStyle(
-                                    color: Colors.grey[800],
+                                    color: colorScheme.onSurface,
                                   ),
                                   spaceBetweenSelectorAndTextField: 0,
                                 ),
@@ -428,7 +431,7 @@ class _SignupPageState extends State<SignupPage> {
                                   child: Text(
                                     _phoneError!,
                                     style: TextStyle(
-                                      color: Colors.red[400],
+                                      color: colorScheme.error,
                                       fontSize: 12,
                                     ),
                                   ),
@@ -441,37 +444,37 @@ class _SignupPageState extends State<SignupPage> {
                           // Garud ID Field
                           TextFormField(
                             controller: _garudIdController,
-                            style: TextStyle(color: Colors.grey[800]),
+                            style: TextStyle(color: colorScheme.onSurface),
                             decoration: InputDecoration(
                               labelText: 'Garud ID',
-                              prefixIcon: Icon(Icons.badge_outlined, color: Colors.blue[600]),
-                              labelStyle: TextStyle(color: Colors.grey[600]),
+                              prefixIcon: Icon(Icons.badge_outlined, color: colorScheme.primary),
+                              labelStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.grey[300]!),
+                                borderSide: BorderSide(color: colorScheme.outline),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.blue[600]!, width: 2),
+                                borderSide: BorderSide(color: colorScheme.primary, width: 2),
                               ),
                               errorBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.red[400]!, width: 2),
+                                borderSide: BorderSide(color: colorScheme.error, width: 2),
                               ),
                               focusedErrorBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
-                                borderSide: BorderSide(color: Colors.red[400]!, width: 2),
+                                borderSide: BorderSide(color: colorScheme.error, width: 2),
                               ),
                               filled: true,
-                              fillColor: Colors.grey[50],
+                              fillColor: colorScheme.surfaceVariant.withOpacity(0.3),
                               contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
                               errorText: _garudIdError,
                               helperText: 'Enter a valid Garud ID (e.g. garud001)',
-                              helperStyle: TextStyle(color: Colors.grey[500]),
+                              helperStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                             ),
                           ),
                           
@@ -481,14 +484,14 @@ class _SignupPageState extends State<SignupPage> {
                           Container(
                             padding: EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.grey[50],
+                              color: colorScheme.surfaceVariant.withOpacity(0.3),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey[200]!),
+                              border: Border.all(color: colorScheme.outline.withOpacity(0.5)),
                             ),
                             child: Row(
                               children: [
                                 Icon(Icons.notifications_active_outlined, 
-                                    color: _enableAlerts ? Colors.blue[600] : Colors.grey[500]),
+                                    color: _enableAlerts ? colorScheme.primary : colorScheme.onSurfaceVariant),
                                 SizedBox(width: 12),
                                 Expanded(
                                   child: Column(
@@ -499,14 +502,15 @@ class _SignupPageState extends State<SignupPage> {
                                         style: TextStyle(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w500,
-                                          color: Colors.grey[800],
+                                          color: colorScheme.onSurface,
                                         ),
                                       ),
+                                      SizedBox(height: 4),
                                       Text(
-                                        'Receive notifications for important alerts',
+                                        'Receive real-time security alerts',
                                         style: TextStyle(
                                           fontSize: 14,
-                                          color: Colors.grey[600],
+                                          color: colorScheme.onSurfaceVariant,
                                         ),
                                       ),
                                     ],
@@ -514,15 +518,13 @@ class _SignupPageState extends State<SignupPage> {
                                 ),
                                 Switch(
                                   value: _enableAlerts,
-                                  onChanged: (bool value) {
+                                  onChanged: (value) {
                                     setState(() {
                                       _enableAlerts = value;
                                     });
                                   },
-                                  activeColor: Colors.blue[600],
-                                  activeTrackColor: Colors.blue[200],
-                                  inactiveThumbColor: Colors.grey[400],
-                                  inactiveTrackColor: Colors.grey[300],
+                                  activeColor: colorScheme.primary,
+                                  inactiveTrackColor: colorScheme.surfaceVariant,
                                 ),
                               ],
                             ),
@@ -530,47 +532,32 @@ class _SignupPageState extends State<SignupPage> {
                           
                           SizedBox(height: 30),
                           
-                          // Sign Up Button
-                          state is AuthLoading || _isValidatingId
-                              ? Container(
+                          // Signup Button
+                          state is AuthLoading
+                              ? const SizedBox(
                                   height: 56,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    gradient: LinearGradient(
-                                      colors: [Colors.blue[400]!, Colors.blue[600]!],
-                                    ),
-                                  ),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                    ),
-                                  ),
+                                  child: Center(child: CircularProgressIndicator()),
                                 )
-                              : Container(
+                              : SizedBox(
                                   width: double.infinity,
                                   height: 56,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    gradient: LinearGradient(
-                                      colors: [Colors.blue[600]!, Colors.blue[800]!],
-                                      begin: Alignment.centerLeft,
-                                      end: Alignment.centerRight,
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.blue.withOpacity(0.3),
-                                        blurRadius: 10,
-                                        offset: Offset(0, 4),
-                                      ),
-                                    ],
-                                  ),
                                   child: ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: colorScheme.primary,
+                                      foregroundColor: colorScheme.onPrimary,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      elevation: 5,
+                                      shadowColor: colorScheme.primary.withOpacity(0.4),
+                                    ),
                                     onPressed: () async {
                                       final validationError = _validateInputs();
                                       if (validationError != null) {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
-                                            content: Text(validationError, style: TextStyle(color: Colors.white)),
+                                            content: Text(validationError,
+                                                style: TextStyle(color: colorScheme.onPrimary)),
                                             backgroundColor: Colors.orange[600],
                                             behavior: SnackBarBehavior.floating,
                                             shape: RoundedRectangleBorder(
@@ -590,7 +577,7 @@ class _SignupPageState extends State<SignupPage> {
                                       if (phone == null || phone.isEmpty) {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
-                                            content: Text('Please enter a valid phone number', style: TextStyle(color: Colors.white)),
+                                            content: Text('Please enter a valid phone number', style: TextStyle(color: colorScheme.onPrimary)),
                                             backgroundColor: Colors.orange[600],
                                             behavior: SnackBarBehavior.floating,
                                             shape: RoundedRectangleBorder(
@@ -616,19 +603,11 @@ class _SignupPageState extends State<SignupPage> {
                                         );
                                       }
                                     },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: Colors.transparent,
-                                      shadowColor: Colors.transparent,
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(12),
-                                      ),
-                                    ),
                                     child: Text(
-                                      'Sign Up',
+                                      'Create Account',
                                       style: TextStyle(
                                         fontSize: 18,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.white,
                                       ),
                                     ),
                                   ),
@@ -639,28 +618,28 @@ class _SignupPageState extends State<SignupPage> {
                     
                     SizedBox(height: 30),
                     
-                    // Login Link
+                    // Login Redirect
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
-                          'Already have an account? ',
+                          "Already have an account? ",
                           style: TextStyle(
-                            color: Colors.grey[600],
                             fontSize: 16,
+                            color: colorScheme.onBackground.withOpacity(0.6),
                           ),
                         ),
                         GestureDetector(
                           onTap: () {
-                            Navigator.pushReplacement(
+                            Navigator.push(
                               context,
                               MaterialPageRoute(builder: (_) => LoginPage()),
                             );
                           },
                           child: Text(
-                            'Login',
+                            'Sign In',
                             style: TextStyle(
-                              color: Colors.blue[600],
+                              color: colorScheme.primary,
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
                             ),
